@@ -1,5 +1,5 @@
 [project]
-name = "shasradio-discord"
+name = "mercuryradio"
 version = "0.1.0"
 description = "A private Discord where friends hear the same stream and rate the song playing now."
 requires-python = ">=3.11"

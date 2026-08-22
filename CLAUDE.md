@@ -1,4 +1,4 @@
-# shasradio-discord — agent orientation
+# mercuryradio — agent orientation
 
 A private Discord where friends hear the **same stream** and rate the song playing now on a live
 colored sidebar; the next block is picked from the ratings of whoever is in the voice channel.
@@ -6,8 +6,8 @@ The "room" half of the shasradio/mercury radio projects. See `README.md` for use
 config, and run/deploy.
 
 ## Where the rest lives
-- **Full build plan:** `~/.claude/plans/shasradio-discord.md` — architecture, all six phases, verification.
-- **Project record** (status, decisions, log): `~/Personal/Notes/shasradio discord.md`. Update it at
+- **Full build plan:** `~/.claude/plans/mercuryradio.md` — architecture, all six phases, verification.
+- **Project record** (status, decisions, log): `~/Personal/Notes/mercuryradio.md`. Update it at
   milestones — this repo doesn't carry that history.
 - **Ported-from:** `~/devel/mercury` is reference logic for the Phase 4 engine (port the algorithm,
   don't import it — mercury is Spotify/Postgres-bound). Key lines: `queue_manager.py:17-102` (block

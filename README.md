@@ -1,4 +1,4 @@
-# shasradio-discord
+# mercuryradio
 
 A small private Discord server where a few friends hear the **same stream at the same time**,
 rate the song playing now on a live colored sidebar, and the next block is chosen from the

@@ -1,4 +1,4 @@
-"""shasradio-discord — Phase 2: continuous block radio.
+"""mercuryradio — Phase 2: continuous block radio.
 
 The bot joins a voice channel and streams a shuffled walk of a music library,
 chaining track to track so it never stops. `/skip` jumps to the next track.
@@ -101,7 +101,7 @@ guild = discord.Object(id=GUILD_ID)
 async def on_ready() -> None:
     _ensure_opus()
     await tree.sync(guild=guild)
-    print(f"shasradio up as {client.user}")
+    print(f"mercuryradio up as {client.user}")
 
 
 @tree.command(name="join", description="Join your voice channel and start the radio.", guild=guild)

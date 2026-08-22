@@ -4,10 +4,10 @@
 # Set DISCORD_TOKEN, GUILD_ID and MUSIC_DIR in a .env file next to this one (or
 # in Portainer's stack environment). MUSIC_DIR is the host path to your library.
 services:
-  shasradio:
+  mercuryradio:
     build: .
-    image: shasradio-discord
-    container_name: shasradio
+    image: mercuryradio
+    container_name: mercuryradio
     restart: unless-stopped
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
