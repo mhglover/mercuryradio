@@ -1,12 +1,17 @@
-"""shasradio-discord — Phase 1: a bot that joins a voice channel and streams one
-file, so two people hear the same audio at the same position. Proves the
-shared-stream premise before anything else gets built.
+"""shasradio-discord — Phase 2: continuous block radio.
+
+The bot joins a voice channel and streams a shuffled walk of a music library,
+chaining track to track so it never stops. `/skip` jumps to the next track.
+This is the flat-shuffle foundation the selection engine (Phase 4) will replace
+with rating-scored block composition.
 
 Config comes from the environment (see .env.sample). No paths or tokens live in
 this file.
 """
 
 import os
+import random
+from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -16,10 +21,18 @@ load_dotenv()
 
 TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD_ID = int(os.environ["GUILD_ID"])
-TEST_FILE = os.environ["TEST_FILE"]
+MUSIC_DIR = os.environ["MUSIC_DIR"]
 
-# -vn drops the embedded cover-art video stream; audio only.
+AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma"}
+
+# -vn drops any embedded cover-art video stream; audio only.
 FFMPEG_OPTS = {"options": "-vn"}
+
+# Single-guild state (this bot serves one private server).
+_playlist: list[str] = []
+_pos = 0
+current_track: str | None = None
+
 
 def _ensure_opus() -> None:
     """Load libopus for voice encoding. discord.py auto-loads it on some
@@ -47,17 +60,41 @@ def _ensure_opus() -> None:
     raise RuntimeError("libopus not found — install it (brew install opus / apt install libopus0)")
 
 
+def _load_library() -> list[str]:
+    files = [str(p) for p in Path(MUSIC_DIR).rglob("*") if p.suffix.lower() in AUDIO_EXTS]
+    random.shuffle(files)
+    return files
+
+
+def _play_next(vc: discord.VoiceClient) -> None:
+    """Play the next track; reshuffle and wrap when the list is exhausted.
+    Runs both at /join and from the after-callback (a worker thread) — calling
+    vc.play() from there is the supported discord.py chaining pattern.
+    """
+    global _pos, current_track
+    if not vc.is_connected() or not _playlist:
+        return
+    if _pos >= len(_playlist):
+        random.shuffle(_playlist)
+        _pos = 0
+    path = _playlist[_pos]
+    _pos += 1
+    current_track = Path(path).stem
+    source = discord.FFmpegPCMAudio(path, **FFMPEG_OPTS)
+    vc.play(source, after=lambda err: _after(vc, err, path))
+
+
+def _after(vc: discord.VoiceClient, err: Exception | None, path: str) -> None:
+    if err:
+        print(f"playback error on {path}: {err}")  # skip the bad file, keep going
+    _play_next(vc)
+
+
 intents = discord.Intents.default()
 intents.voice_states = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 guild = discord.Object(id=GUILD_ID)
-
-
-def _play(vc: discord.VoiceClient) -> None:
-    """Play TEST_FILE, looping when it ends so late joiners still hear it."""
-    source = discord.FFmpegPCMAudio(TEST_FILE, **FFMPEG_OPTS)
-    vc.play(source, after=lambda err: _play(vc) if not err and vc.is_connected() else None)
 
 
 @client.event
@@ -67,8 +104,9 @@ async def on_ready() -> None:
     print(f"shasradio up as {client.user}")
 
 
-@tree.command(name="join", description="Join your voice channel and start the stream.", guild=guild)
+@tree.command(name="join", description="Join your voice channel and start the radio.", guild=guild)
 async def join(interaction: discord.Interaction) -> None:
+    global _playlist, _pos
     voice = getattr(interaction.user, "voice", None)
     if not voice or not voice.channel:
         await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
@@ -78,11 +116,36 @@ async def join(interaction: discord.Interaction) -> None:
         await vc.move_to(voice.channel)
     else:
         vc = await voice.channel.connect()
-    _play(vc)
-    await interaction.response.send_message(f"Streaming in {voice.channel.name}.", ephemeral=True)
+    if not _playlist:
+        _playlist = _load_library()
+        _pos = 0
+    if not _playlist:
+        await interaction.response.send_message(f"No audio files under {MUSIC_DIR}.", ephemeral=True)
+        return
+    if not vc.is_playing():
+        _play_next(vc)
+    await interaction.response.send_message(
+        f"Radio on in {voice.channel.name} — {len(_playlist)} tracks.", ephemeral=True
+    )
 
 
-@tree.command(name="leave", description="Stop the stream and leave.", guild=guild)
+@tree.command(name="skip", description="Skip to the next track.", guild=guild)
+async def skip(interaction: discord.Interaction) -> None:
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.stop()  # fires the after-callback, which advances
+        await interaction.response.send_message("Skipped.", ephemeral=True)
+    else:
+        await interaction.response.send_message("Nothing playing.", ephemeral=True)
+
+
+@tree.command(name="nowplaying", description="Show the current track.", guild=guild)
+async def nowplaying(interaction: discord.Interaction) -> None:
+    msg = f"Now playing: {current_track}" if current_track else "Nothing playing."
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
+@tree.command(name="leave", description="Stop the radio and leave.", guild=guild)
 async def leave(interaction: discord.Interaction) -> None:
     vc = interaction.guild.voice_client
     if vc:

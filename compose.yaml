@@ -1,0 +1,17 @@
+# Runs alongside Plex/Tautulli/Transmission — no published ports, just Discord
+# egress and a read-only bind mount of your music library.
+#
+# Set DISCORD_TOKEN, GUILD_ID and MUSIC_DIR in a .env file next to this one (or
+# in Portainer's stack environment). MUSIC_DIR is the host path to your library.
+services:
+  shasradio:
+    build: .
+    image: shasradio-discord
+    container_name: shasradio
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
+      GUILD_ID: ${GUILD_ID:?set GUILD_ID}
+      MUSIC_DIR: /music
+    volumes:
+      - ${MUSIC_DIR:?set MUSIC_DIR to your library path}:/music:ro

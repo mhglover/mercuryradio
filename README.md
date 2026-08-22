@@ -9,22 +9,46 @@ listener set.
 The code ships **no music** — you point it at your own library. Copyright posture of what you
 stream is yours to hold.
 
-## Status: Phase 1
+## Status: Phase 2 — continuous radio
 
-Bot joins a voice channel and streams one configured file, so two people can confirm they hear
-the same audio at the same position. That's the whole premise; the rest builds on it.
+The bot joins a voice channel and streams a shuffled walk of your library, chaining track to
+track so it never stops. Commands: `/join`, `/skip`, `/nowplaying`, `/leave`.
 
-Roadmap: (1) join + stream one file · (2) continuous shuffle + `/skip` · (3) ratings + live
-sidebar · (4) selection engine over VC members · (5) requests + chat · (6) package/Docker.
+Roadmap: (1) ✅ join + stream one file · (2) ✅ continuous shuffle + `/skip` · (3) ratings + live
+sidebar · (4) selection engine over VC members · (5) requests + chat · (6) polish.
 
-## Run
+## Config
 
-Needs `ffmpeg` on PATH.
+Copy `.env.sample` to `.env` and set:
+
+- `DISCORD_TOKEN` — bot token from the Discord Developer Portal.
+- `GUILD_ID` — your server's id.
+- `MUSIC_DIR` — path to your music library (scanned recursively for `.flac .mp3 .m4a .aac .ogg
+  .opus .wav .wma`).
+
+Invite the bot with the `bot` + `applications.commands` scopes and the **View Channels, Send
+Messages, Embed Links, Connect, Speak** permissions.
+
+## Run locally
+
+Needs `ffmpeg` (and libopus) on PATH.
 
 ```
-cp .env.sample .env      # fill in DISCORD_TOKEN, GUILD_ID, TEST_FILE
+cp .env.sample .env      # fill in the three values
 uv run bot.py
 ```
 
-The bot needs the **Server Members** and **Voice** privileges and the `applications.commands`
-scope when you invite it. Then `/join` from a voice channel; `/leave` to stop.
+Then `/join` from a voice channel.
+
+## Run in Docker (alongside Plex/Tautulli/Transmission)
+
+No published ports — it only needs Discord egress and a read-only mount of your library. Set the
+three values in `.env`, then:
+
+```
+docker compose up -d --build
+```
+
+Or point Portainer at this repo as a stack (set `DISCORD_TOKEN`, `GUILD_ID`, `MUSIC_DIR` in the
+stack environment). The image bundles ffmpeg + libopus; the container mounts `MUSIC_DIR` read-only
+at `/music`.
