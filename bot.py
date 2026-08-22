@@ -18,11 +18,8 @@ TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD_ID = int(os.environ["GUILD_ID"])
 TEST_FILE = os.environ["TEST_FILE"]
 
-# FFmpeg reconnect flags keep the stream alive across brief hiccups.
-FFMPEG_OPTS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn",
-}
+# -vn drops the embedded cover-art video stream; audio only.
+FFMPEG_OPTS = {"options": "-vn"}
 
 def _ensure_opus() -> None:
     """Load libopus for voice encoding. discord.py auto-loads it on some
