@@ -24,6 +24,32 @@ FFMPEG_OPTS = {
     "options": "-vn",
 }
 
+def _ensure_opus() -> None:
+    """Load libopus for voice encoding. discord.py auto-loads it on some
+    platforms but not macOS, where find_library('opus') comes back empty even
+    with Homebrew's copy installed — so try the usual locations explicitly.
+    """
+    if discord.opus.is_loaded():
+        return
+    from ctypes.util import find_library
+
+    candidates = [
+        find_library("opus"),
+        "/opt/homebrew/lib/libopus.dylib",  # macOS, Apple Silicon
+        "/usr/local/lib/libopus.dylib",  # macOS, Intel
+        "libopus.so.0",  # Linux
+    ]
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            discord.opus.load_opus(path)
+            return
+        except OSError:
+            continue
+    raise RuntimeError("libopus not found — install it (brew install opus / apt install libopus0)")
+
+
 intents = discord.Intents.default()
 intents.voice_states = True
 client = discord.Client(intents=intents)
@@ -39,6 +65,7 @@ def _play(vc: discord.VoiceClient) -> None:
 
 @client.event
 async def on_ready() -> None:
+    _ensure_opus()
     await tree.sync(guild=guild)
     print(f"shasradio up as {client.user}")
 
