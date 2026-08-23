@@ -301,27 +301,16 @@ async def _clear_nowplaying(radio: GuildRadio, clear_status: bool = True) -> Non
 # ── discord wiring ──────────────────────────────────────────────────────────
 
 
-async def _announce_shutdown() -> None:
-    """Post an off-air notice to every active guild's card channel before close."""
+async def _clear_cards_on_shutdown() -> None:
+    """Delete the now-playing cards on shutdown so a (seconds-long) restart doesn't
+    leave orphaned cards with dead buttons behind. No off-air announcement — that
+    just spammed the channel on every quick redeploy."""
     for radio in radios.values():
-        if not radio.active:
-            continue
-        ch = None
-        if radio.nowplaying_channel_id:
-            ch = client.get_channel(radio.nowplaying_channel_id)
-        if ch is None and radio.voice_channel_id:
-            ch = client.get_channel(radio.voice_channel_id)
-        if ch is None:
-            continue
-        try:
-            await _clear_nowplaying(radio, clear_status=False)
-            await ch.send("📻 Mercury Radio is going off the air — back soon.")
-        except discord.HTTPException:
-            pass
+        await _clear_nowplaying(radio, clear_status=False)
 
 
 class MercuryClient(discord.Client):
-    _shutdown_announced = False
+    _shutdown_done = False
 
     async def setup_hook(self) -> None:
         # docker stop/restart sends SIGTERM; asyncio.run doesn't trap it, so the
@@ -334,9 +323,9 @@ class MercuryClient(discord.Client):
             pass
 
     async def close(self) -> None:
-        if not self._shutdown_announced:
-            self._shutdown_announced = True
-            await _announce_shutdown()
+        if not self._shutdown_done:
+            self._shutdown_done = True
+            await _clear_cards_on_shutdown()
         await super().close()
 
 
