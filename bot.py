@@ -85,19 +85,16 @@ async def _advance(vc: discord.VoiceClient) -> None:
     if not members:
         return
     member_ids = [str(m.id) for m in members]
-    # Explicit /requests preempt the block; otherwise pop the next type from the
-    # shuffled block (refilling + reshuffling when it empties).
-    req = db.next_request(conn)
-    if req is not None:
-        row, picker = dict(req), "request"
+    # Pop the next type from the shuffled block; when it empties, compose a fresh
+    # one sized to the request backlog (shasradio: a 6th request slot at 3+ queued).
+    if not _block:
+        _block = engine.new_block(db.pending_request_count(conn))
+    row, picker = engine.pick(conn, member_ids, _block.pop())
+    if row is None:
+        return
+    row = dict(row)
+    if picker == "request":
         db.mark_request_played(conn, row["id"])
-    else:
-        if not _block:
-            _block = engine.new_block()
-        row, picker = engine.pick(conn, member_ids, _block.pop())
-        if row is None:
-            return
-        row = dict(row)
     _current_row = row
     current_track = f"{row['artist']} – {row['title']}"
     db.record_play(conn, row["id"], reason=picker)
@@ -389,7 +386,7 @@ async def request(interaction: discord.Interaction, track: str) -> None:
         return
     db.add_request(conn, row["id"], str(interaction.user.id))
     ahead = db.pending_request_count(conn) - 1
-    when = "up next" if ahead <= 0 else f"{ahead} request(s) ahead"
+    when = "plays in the next block" if ahead <= 0 else f"{ahead} request(s) ahead of it"
     await interaction.response.send_message(
         f"Queued **{row['artist']} – {row['title']}** — {when}.", ephemeral=True
     )

@@ -65,10 +65,27 @@ def test_always_returns_something_when_library_nonempty():
     assert row is not None and name is not None
 
 
-def test_new_block_is_a_shuffled_full_set():
+def test_new_block_shuffles_and_grows_with_backlog():
     for _ in range(20):
         b = engine.new_block()
         assert sorted(b) == sorted(engine.BLOCK_TYPES)
+    grown = engine.new_block(pending_requests=engine.REQUEST_GROW_AT)
+    assert len(grown) == len(engine.BLOCK_TYPES) + 1  # shasradio's appended slot
+    assert grown.count("request") == 2
+
+
+def test_request_slot_plays_queue_then_falls_back():
+    conn, t, _ab = _seed()
+    for k in t:
+        db.set_rating(conn, "u1", t[k], db.LIKE)  # so 'top' has candidates
+    conn.commit()
+    # empty queue -> the request slot falls back to music (never None, never None-named)
+    row, name = engine.pick(conn, ["u1"], "request")
+    assert row is not None and name != "request"
+    # queued -> the request slot serves the queued track
+    db.add_request(conn, t[("C", "c1")], "u1")
+    row, name = engine.pick(conn, ["u1"], "request")
+    assert name == "request" and (row["artist"], row["title"]) == ("C", "c1")
 
 
 def test_request_queue_fifo_and_played():
@@ -98,7 +115,8 @@ if __name__ == "__main__":
         test_timeout_excludes_recently_played,
         test_artist_guard_avoids_back_to_back,
         test_always_returns_something_when_library_nonempty,
-        test_new_block_is_a_shuffled_full_set,
+        test_new_block_shuffles_and_grows_with_backlog,
+        test_request_slot_plays_queue_then_falls_back,
         test_request_queue_fifo_and_played,
         test_search_excludes_audiobooks,
     ):

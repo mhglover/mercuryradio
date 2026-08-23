@@ -9,15 +9,25 @@ from play_history. Explicit /requests preempt the block (handled by the caller).
 import random
 from datetime import datetime, timedelta, timezone
 
-# The five picker types that make up one block. 'top' appears twice so loved
-# tracks recur. new_block() shuffles a copy so the order varies every block.
-BLOCK_TYPES = ["top", "top", "allpos", "fresh", "wildcard"]
+# shasradio's default block (radiod.pl / config): one request slot, two top-band,
+# allpos, fresh — composed then shuffled so the shape isn't audible. The request
+# slot falls back to rating-music when the queue is empty, so it costs nothing on
+# a quiet night. 'wildcard' (pure discovery) stays in the fallback chain, not the
+# base block. See ~/Personal/Notes/shasradio design.md.
+BLOCK_TYPES = ["request", "top", "top", "allpos", "fresh"]
+
+# shasradio grew the block by a slot when the request backlog built up, so demand
+# drained without starving the ratings music (radiod.pl:183).
+REQUEST_GROW_AT = 3
 
 
-def new_block() -> list:
-    """A fresh block: BLOCK_TYPES in random order. The caller pops one per track
+def new_block(pending_requests: int = 0) -> list:
+    """A fresh block: BLOCK_TYPES shuffled, plus a second request slot when the
+    queue is backed up (>= REQUEST_GROW_AT). The caller pops one type per track
     and calls new_block() again when it empties."""
     block = BLOCK_TYPES[:]
+    if pending_requests >= REQUEST_GROW_AT:
+        block.append("request")
     random.shuffle(block)
     return block
 
@@ -105,7 +115,23 @@ def _any(conn, artist_n):
     ).fetchone()
 
 
-_PICKERS = {"top": _top, "allpos": _allpos, "fresh": _fresh, "wildcard": _wildcard}
+def _request(conn, members, cutoff, artist_n, top_k):
+    """The oldest unplayed listener request. Bypasses timeout/artist guard — an
+    explicit request wins. Returns None (so the slot falls back) when none queued."""
+    return conn.execute(
+        "SELECT t.id, t.path, t.artist, t.title FROM requests req "
+        "JOIN tracks t ON t.id = req.track_id "
+        "WHERE req.played_at IS NULL ORDER BY req.requested_at ASC LIMIT 1"
+    ).fetchone()
+
+
+_PICKERS = {
+    "request": _request,
+    "top": _top,
+    "allpos": _allpos,
+    "fresh": _fresh,
+    "wildcard": _wildcard,
+}
 
 
 def pick(conn, members, want, *, timeout_days=10, artist_guard=2, top_k=25):
