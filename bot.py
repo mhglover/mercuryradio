@@ -53,6 +53,9 @@ current_track: str | None = None
 _active = False  # True only while a human is listening; gates streaming
 _current_row: dict | None = None  # the track playing now (id/artist/title/album/path)
 _np_message: discord.Message | None = None  # the live now-playing card
+_recent_artists: list = []  # rolling window for the channel-topic update
+_since_topic = 0            # tracks played since the topic was last refreshed
+TOPIC_EVERY = 5             # refresh the topic once per this many tracks
 
 
 def _ensure_opus() -> None:
@@ -213,12 +216,19 @@ async def _post_nowplaying(voice_channel, row: dict) -> None:
         )
     except discord.HTTPException:
         pass
-    # Reflect the track in the channel topic. Best-effort: Discord throttles channel
-    # edits to ~2 per 10 min, so on short tracks the topic lags the card and presence.
-    try:
-        await channel.edit(topic=f"🎵 {row['artist']} – {row['title']}")
-    except (discord.HTTPException, AttributeError) as e:
-        print(f"could not set channel topic: {e}")
+    # Reflect recent artists in the channel topic, but only every TOPIC_EVERY tracks
+    # — Discord throttles channel edits to ~2 per 10 min, so a per-song edit gets 429'd.
+    global _since_topic
+    _recent_artists.append(row["artist"])
+    del _recent_artists[:-TOPIC_EVERY]  # keep the last TOPIC_EVERY
+    _since_topic += 1
+    if _since_topic >= TOPIC_EVERY:
+        _since_topic = 0
+        recent = list(dict.fromkeys(_recent_artists))  # dedup, keep order
+        try:
+            await channel.edit(topic="🎵 Recent: " + ", ".join(recent))
+        except (discord.HTTPException, AttributeError) as e:
+            print(f"could not set channel topic: {e}")
 
 
 async def _clear_nowplaying() -> None:

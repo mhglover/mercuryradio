@@ -105,7 +105,11 @@ def track_id_for_path(conn, path: str) -> int | None:
 
 
 def all_tracks(conn) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, path, artist, title FROM tracks").fetchall()
+    # Exclude audiobooks (they live under a top-level Audiobooks/ dir) — the radio
+    # plays music, not chapter-by-chapter narration.
+    return conn.execute(
+        "SELECT id, path, artist, title FROM tracks WHERE path NOT LIKE '%/Audiobooks/%'"
+    ).fetchall()
 
 
 def upsert_user(conn, user_id: str, name: str | None = None) -> None:
