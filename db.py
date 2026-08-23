@@ -53,6 +53,14 @@ CREATE TABLE IF NOT EXISTS options (
     name  TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS requests (
+    id           INTEGER PRIMARY KEY,
+    track_id     INTEGER NOT NULL,
+    user_id      TEXT,
+    requested_at TEXT NOT NULL,
+    played_at    TEXT,
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+);
 """
 
 
@@ -127,6 +135,51 @@ def record_play(conn, track_id: int, reason: str | None = None, user_id: str | N
         (track_id, user_id, _now(), reason),
     )
     conn.commit()
+
+
+def search_tracks(conn, query: str, limit: int = 25) -> list[sqlite3.Row]:
+    """Substring match on artist or title, music only — feeds /request autocomplete."""
+    like = f"%{query.strip()}%"
+    return conn.execute(
+        f"SELECT id, artist, title FROM tracks "
+        f"WHERE {_NOT_AUDIOBOOK} AND (artist LIKE ? OR title LIKE ?) "
+        f"ORDER BY artist, title LIMIT ?",
+        (like, like, limit),
+    ).fetchall()
+
+
+def add_request(conn, track_id: int, user_id: str | None = None) -> None:
+    conn.execute(
+        "INSERT INTO requests (track_id, user_id, requested_at) VALUES (?, ?, ?)",
+        (track_id, user_id, _now()),
+    )
+    conn.commit()
+
+
+def next_request(conn) -> sqlite3.Row | None:
+    """The oldest unplayed request as a playable track row, or None."""
+    return conn.execute(
+        "SELECT t.id, t.path, t.artist, t.title FROM requests req "
+        "JOIN tracks t ON t.id = req.track_id "
+        "WHERE req.played_at IS NULL ORDER BY req.requested_at ASC LIMIT 1"
+    ).fetchone()
+
+
+def mark_request_played(conn, track_id: int) -> None:
+    """Mark the oldest unplayed request for this track as played."""
+    conn.execute(
+        "UPDATE requests SET played_at = ? WHERE id = ("
+        "SELECT id FROM requests WHERE track_id = ? AND played_at IS NULL "
+        "ORDER BY requested_at ASC LIMIT 1)",
+        (_now(), track_id),
+    )
+    conn.commit()
+
+
+def pending_request_count(conn) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM requests WHERE played_at IS NULL"
+    ).fetchone()["n"]
 
 
 def upsert_user(conn, user_id: str, name: str | None = None) -> None:

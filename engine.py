@@ -1,16 +1,25 @@
 """Selection engine: pick the next track scored over the members present in the
 voice channel right now — the shasradio 'room'. Ported from mercury's block
 pickers (blocktypes.py) and its queue loop (queue_manager.py), reduced to SQLite
-plus a local library. Stateless: the caller passes the block slot index; the
-recent-play state (timeout + artist guard) is read from play_history.
+plus a local library. Stateless: the caller draws a shuffled block, pops a type
+per track, and asks for it; recent-play state (timeout + artist guard) is read
+from play_history. Explicit /requests preempt the block (handled by the caller).
 """
 
 import random
 from datetime import datetime, timedelta, timezone
 
-# One block = five slots. 'request' is Phase 5; until then every slot is music
-# picked from the present room's ratings. 'top' repeats so loved tracks recur.
-BLOCK = ["top", "top", "allpos", "fresh", "wildcard"]
+# The five picker types that make up one block. 'top' appears twice so loved
+# tracks recur. new_block() shuffles a copy so the order varies every block.
+BLOCK_TYPES = ["top", "top", "allpos", "fresh", "wildcard"]
+
+
+def new_block() -> list:
+    """A fresh block: BLOCK_TYPES in random order. The caller pops one per track
+    and calls new_block() again when it empties."""
+    block = BLOCK_TYPES[:]
+    random.shuffle(block)
+    return block
 
 _COLS = "t.id, t.path, t.artist, t.title"
 _NOT_AUDIOBOOK = "t.path NOT LIKE '%/Audiobooks/%'"
@@ -99,15 +108,14 @@ def _any(conn, artist_n):
 _PICKERS = {"top": _top, "allpos": _allpos, "fresh": _fresh, "wildcard": _wildcard}
 
 
-def pick_next(conn, members, slot, *, timeout_days=10, artist_guard=2, top_k=25):
-    """Pick the next track for this block slot, scored over `members` (present
-    user ids, as strings). Falls through the other pickers, then to any track, so
-    it always returns something while the library is non-empty. Returns
-    (row, picker_name), or (None, None) only if there are no playable tracks."""
+def pick(conn, members, want, *, timeout_days=10, artist_guard=2, top_k=25):
+    """Pick a track of type `want`, scored over `members` (present user ids, as
+    strings). Falls through the other pickers, then to any track, so it always
+    returns something while the library is non-empty. Returns (row, picker_name),
+    or (None, None) only if there are no playable tracks at all."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=timeout_days)).isoformat()
-    first = BLOCK[slot % len(BLOCK)]
     tried = []
-    for name in (first, "top", "allpos", "fresh", "wildcard"):
+    for name in (want, "top", "allpos", "fresh", "wildcard"):
         if name in tried:
             continue
         tried.append(name)

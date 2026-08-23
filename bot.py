@@ -47,7 +47,7 @@ UNRATED = "⬛"
 
 conn = None
 _loop = None
-_slot = 0  # block position for the selection engine (engine.BLOCK)
+_block: list = []  # remaining picker types in the current shuffled block
 current_track: str | None = None
 _active = False  # True only while a human is listening; gates streaming
 _current_row: dict | None = None  # the track playing now (id/artist/title/album/path)
@@ -78,18 +78,26 @@ async def _advance(vc: discord.VoiceClient) -> None:
     """Compose and play the next track, scored over whoever is in the VC right
     now (the 'room'). Runs on the loop thread — db access is loop-thread-bound —
     and the after-callback (worker thread) hops back here via run_coroutine_threadsafe."""
-    global _slot, current_track, _current_row
+    global _block, current_track, _current_row
     if not _active or not vc.is_connected():
         return
     members = _listeners(vc.channel)
     if not members:
         return
     member_ids = [str(m.id) for m in members]
-    row, picker = engine.pick_next(conn, member_ids, _slot)
-    if row is None:
-        return
-    _slot += 1
-    row = dict(row)
+    # Explicit /requests preempt the block; otherwise pop the next type from the
+    # shuffled block (refilling + reshuffling when it empties).
+    req = db.next_request(conn)
+    if req is not None:
+        row, picker = dict(req), "request"
+        db.mark_request_played(conn, row["id"])
+    else:
+        if not _block:
+            _block = engine.new_block()
+        row, picker = engine.pick(conn, member_ids, _block.pop())
+        if row is None:
+            return
+        row = dict(row)
     _current_row = row
     current_track = f"{row['artist']} – {row['title']}"
     db.record_play(conn, row["id"], reason=picker)
@@ -361,6 +369,41 @@ async def skip(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Skipped.", ephemeral=True)
     else:
         await interaction.response.send_message("Nothing playing.", ephemeral=True)
+
+
+@tree.command(name="request", description="Request a track — it plays next.", guild=guild)
+@app_commands.describe(track="Start typing an artist or title, then pick from the list")
+async def request(interaction: discord.Interaction, track: str) -> None:
+    # `track` is the autocomplete Choice value (a track id). If someone submits
+    # free text without picking, fall back to the best substring match.
+    row = None
+    if track.isdigit():
+        row = conn.execute(
+            "SELECT id, artist, title FROM tracks WHERE id = ?", (int(track),)
+        ).fetchone()
+    if row is None:
+        matches = db.search_tracks(conn, track, 1)
+        row = matches[0] if matches else None
+    if row is None:
+        await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
+        return
+    db.add_request(conn, row["id"], str(interaction.user.id))
+    ahead = db.pending_request_count(conn) - 1
+    when = "up next" if ahead <= 0 else f"{ahead} request(s) ahead"
+    await interaction.response.send_message(
+        f"Queued **{row['artist']} – {row['title']}** — {when}.", ephemeral=True
+    )
+
+
+@request.autocomplete("track")
+async def _request_autocomplete(interaction: discord.Interaction, current: str):
+    if not current:
+        return []
+    rows = db.search_tracks(conn, current, 25)
+    return [
+        app_commands.Choice(name=f"{r['artist']} – {r['title']}"[:100], value=str(r["id"]))
+        for r in rows
+    ]
 
 
 @tree.command(name="leave", description="Stop the radio and leave.", guild=guild)
