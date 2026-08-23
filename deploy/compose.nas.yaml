@@ -15,5 +15,6 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
       GUILD_ID: ${GUILD_ID:?set GUILD_ID}
       MUSIC_DIR: /music
+      PYTHONUNBUFFERED: "1"  # flush print() to the container log immediately
     volumes:
       - ${MUSIC_DIR:?set MUSIC_DIR to your library host path}:/music:ro
