@@ -318,6 +318,16 @@ tree = app_commands.CommandTree(client)
 guild = discord.Object(id=GUILD_ID)
 
 
+async def _rescan_bg() -> None:
+    """Refresh the library off the loop, after playback has already started.
+    library.scan opens its own connection, so it's safe from the executor thread."""
+    try:
+        n = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
+        print(f"background library rescan complete — {n} tracks")
+    except Exception as e:  # a rescan failure must not take the bot down
+        print(f"background rescan failed: {e}")
+
+
 @client.event
 async def on_ready() -> None:
     # on_ready fires on every gateway (re)connect — make it idempotent: scan the
@@ -327,9 +337,17 @@ async def on_ready() -> None:
     _loop = asyncio.get_running_loop()
     if conn is None:
         conn = db.connect()
-        count = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
         await tree.sync(guild=guild)
-        print(f"mercuryradio up as {client.user} — {count} tracks in the library")
+        # The DB persists across restarts, so on a redeploy we can start playing
+        # from it immediately and rescan in the background — turning a ~2-min boot
+        # gap into a few-second reconnect. Only block on the scan on a first-ever
+        # (empty) DB, when there's nothing to play yet.
+        if db.music_count(conn) > 0:
+            print(f"mercuryradio up as {client.user} — {db.music_count(conn)} tracks (rescanning in background)")
+            _loop.create_task(_rescan_bg())
+        else:
+            count = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
+            print(f"mercuryradio up as {client.user} — {count} tracks (first scan)")
     if not VOICE_CHANNEL_ID:
         return
     channel = client.get_channel(VOICE_CHANNEL_ID)
