@@ -16,17 +16,22 @@ Conflict policy: skip a track the user already rated, unless --overwrite.
 """
 
 import argparse
+import json
+import os
 import re
 import unicodedata
 
 import db
 
-# shasradio username -> Discord user id. Only mapped users are restored.
-# 'shas' (uid 10) is Matthew, the station owner. Add the others once their
-# Discord identities are known — an unmapped user is reported and skipped.
-SHAS_MAP = {
-    "shas": "212364275153371138",  # Matthew
-}
+# shasradio username -> Discord user id. Real ids + names are PII and stay OUT of
+# the repo (this may be open-sourced): put them in shas_map.json (gitignored)
+# next to this file, as {"username": "discord_id", ...}. An unmapped user is
+# reported and skipped. Example: {"shas": "212364275153371138"}.
+_MAP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shas_map.json")
+SHAS_MAP = {}
+if os.path.exists(_MAP_FILE):
+    with open(_MAP_FILE) as f:
+        SHAS_MAP = json.load(f)
 
 # shasradio score is already mercuryradio's scale; kept explicit as a guard.
 VALID_SCORES = {db.HATE, db.DISLIKE, db.SHRUG, db.LIKE, db.LOVE}

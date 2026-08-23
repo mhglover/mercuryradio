@@ -46,18 +46,19 @@ def _seed_library():
 
 
 def test_run_dry_then_commit():
+    si.SHAS_MAP = {"shas": "9999"}  # inject a fake map; real ids live in a gitignored file
+    me = "9999"
     conn = _seed_library()
     # dry run: nothing written
     stats = si.run(_DUMP, conn, commit=False, overwrite=False)
     assert stats["applied"] == 2, stats            # shas: Just Like Heaven + Whisper
     assert stats["no_track"] == 0                   # 'Not In Library' is unrated, never seen
     assert "deirie" in stats["unmapped"]            # deirie not in SHAS_MAP -> skipped
-    assert db.get_rating(conn, si.SHAS_MAP["shas"], 1) is None  # dry run wrote nothing
+    assert db.get_rating(conn, me, 1) is None       # dry run wrote nothing
 
     # commit: shas's two ratings land, with the original scores (incl. the -4 veto)
     stats = si.run(_DUMP, conn, commit=True, overwrite=False)
     assert stats["applied"] == 2
-    me = si.SHAS_MAP["shas"]
     assert db.get_rating(conn, me, 1) == db.LOVE
     assert db.get_rating(conn, me, 2) == db.HATE
 

@@ -1,4 +1,5 @@
 .env
+shas_map.json
 .venv/
 __pycache__/
 *.pyc
