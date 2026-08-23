@@ -13,7 +13,6 @@ this file.
 import asyncio
 import io
 import os
-import random
 import signal
 
 import discord
@@ -21,6 +20,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 import db
+import engine
 import library
 
 load_dotenv()
@@ -47,8 +47,7 @@ UNRATED = "⬛"
 
 conn = None
 _loop = None
-_playlist: list = []
-_pos = 0
+_slot = 0  # block position for the selection engine (engine.BLOCK)
 current_track: str | None = None
 _active = False  # True only while a human is listening; gates streaming
 _current_row: dict | None = None  # the track playing now (id/artist/title/album/path)
@@ -75,38 +74,36 @@ def _ensure_opus() -> None:
     raise RuntimeError("libopus not found — install it (brew install opus / apt install libopus0)")
 
 
-def _ensure_playlist() -> None:
-    global _playlist, _pos
-    if not _playlist:
-        _playlist = [dict(r) for r in db.all_tracks(conn)]
-        random.shuffle(_playlist)
-        _pos = 0
-
-
-def _play_next(vc: discord.VoiceClient) -> None:
-    """Play the next track; reshuffle on wrap. Runs on the main thread (at join)
-    and from the after-callback (worker thread). Schedules the now-playing card
-    onto the loop rather than touching Discord from the worker thread."""
-    global _pos, current_track, _current_row
-    if not _active or not vc.is_connected() or not _playlist:
+async def _advance(vc: discord.VoiceClient) -> None:
+    """Compose and play the next track, scored over whoever is in the VC right
+    now (the 'room'). Runs on the loop thread — db access is loop-thread-bound —
+    and the after-callback (worker thread) hops back here via run_coroutine_threadsafe."""
+    global _slot, current_track, _current_row
+    if not _active or not vc.is_connected():
         return
-    if _pos >= len(_playlist):
-        random.shuffle(_playlist)
-        _pos = 0
-    row = _playlist[_pos]
-    _pos += 1
-    current_track = f"{row['artist']} – {row['title']}"
+    members = _listeners(vc.channel)
+    if not members:
+        return
+    member_ids = [str(m.id) for m in members]
+    row, picker = engine.pick_next(conn, member_ids, _slot)
+    if row is None:
+        return
+    _slot += 1
+    row = dict(row)
     _current_row = row
+    current_track = f"{row['artist']} – {row['title']}"
+    db.record_play(conn, row["id"], reason=picker)
     source = discord.FFmpegPCMAudio(row["path"], **FFMPEG_OPTS)
     vc.play(source, after=lambda err: _after(vc, err, row["path"]))
-    if _loop:
-        asyncio.run_coroutine_threadsafe(_post_nowplaying(vc.channel, row), _loop)
+    await _post_nowplaying(vc.channel, row)
 
 
 def _after(vc: discord.VoiceClient, err: Exception | None, path: str) -> None:
+    # Runs on discord's audio worker thread — schedule the next pick onto the loop.
     if err:
         print(f"playback error on {path}: {err}")
-    _play_next(vc)
+    if _loop:
+        asyncio.run_coroutine_threadsafe(_advance(vc), _loop)
 
 
 def _listeners(channel) -> list:
@@ -121,9 +118,8 @@ def _sync_playback(vc: discord.VoiceClient) -> None:
     if _listeners(vc.channel):
         if not _active:
             _active = True
-            _ensure_playlist()
-            if _playlist and not vc.is_playing():
-                _play_next(vc)
+            if _loop and not vc.is_playing():
+                _loop.create_task(_advance(vc))
     elif _active:
         _active = False
         current_track = None
@@ -346,14 +342,14 @@ async def join(interaction: discord.Interaction) -> None:
         await vc.move_to(channel)
     else:
         vc = await channel.connect()
-    _ensure_playlist()
-    if not _playlist:
+    count = db.music_count(conn)
+    if not count:
         await interaction.response.send_message(f"No tracks in the library ({MUSIC_DIR}).", ephemeral=True)
         return
     _sync_playback(vc)
     state = "on" if _active else "idle until someone joins"
     await interaction.response.send_message(
-        f"Radio {state} in {channel.name} — {len(_playlist)} tracks.", ephemeral=True
+        f"Radio {state} in {channel.name} — {count} tracks.", ephemeral=True
     )
 
 

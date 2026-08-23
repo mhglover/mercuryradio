@@ -104,12 +104,29 @@ def track_id_for_path(conn, path: str) -> int | None:
     return row["id"] if row else None
 
 
+_NOT_AUDIOBOOK = "path NOT LIKE '%/Audiobooks/%'"
+
+
 def all_tracks(conn) -> list[sqlite3.Row]:
     # Exclude audiobooks (they live under a top-level Audiobooks/ dir) — the radio
     # plays music, not chapter-by-chapter narration.
     return conn.execute(
-        "SELECT id, path, artist, title FROM tracks WHERE path NOT LIKE '%/Audiobooks/%'"
+        f"SELECT id, path, artist, title FROM tracks WHERE {_NOT_AUDIOBOOK}"
     ).fetchall()
+
+
+def music_count(conn) -> int:
+    return conn.execute(
+        f"SELECT COUNT(*) AS n FROM tracks WHERE {_NOT_AUDIOBOOK}"
+    ).fetchone()["n"]
+
+
+def record_play(conn, track_id: int, reason: str | None = None, user_id: str | None = None) -> None:
+    conn.execute(
+        "INSERT INTO play_history (track_id, user_id, played_at, reason) VALUES (?, ?, ?, ?)",
+        (track_id, user_id, _now(), reason),
+    )
+    conn.commit()
 
 
 def upsert_user(conn, user_id: str, name: str | None = None) -> None:
