@@ -85,16 +85,25 @@ async def _advance(vc: discord.VoiceClient) -> None:
     if not members:
         return
     member_ids = [str(m.id) for m in members]
+    gid = str(vc.channel.guild.id)
     # Pop the next type from the shuffled block; when it empties, compose a fresh
-    # one sized to the request backlog (shasradio: a 6th request slot at 3+ queued).
+    # one sized to this guild's request backlog (shasradio: a 6th request slot at
+    # 3+ queued). The request slot is guild-scoped so a shared ratings DB can't
+    # bleed one server's requests onto another.
     if not _block:
-        _block = engine.new_block(db.pending_request_count(conn))
-    row, picker = engine.pick(conn, member_ids, _block.pop())
-    if row is None:
-        return
-    row = dict(row)
-    if picker == "request":
-        db.mark_request_played(conn, row["id"])
+        _block = engine.new_block(db.pending_request_count(conn, gid))
+    want = _block.pop()
+    row = picker = None
+    if want == "request":
+        req = db.next_request(conn, gid)
+        if req is not None:
+            row, picker = dict(req), "request"
+            db.mark_request_played(conn, req["id"], gid)
+    if row is None:  # a music slot, or the request queue was empty -> pick music
+        r, picker = engine.pick(conn, member_ids, "top" if want == "request" else want)
+        if r is None:
+            return
+        row = dict(r)
     _current_row = row
     current_track = f"{row['artist']} – {row['title']}"
     db.record_play(conn, row["id"], reason=picker)
@@ -384,8 +393,8 @@ async def request(interaction: discord.Interaction, track: str) -> None:
     if row is None:
         await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
         return
-    db.add_request(conn, row["id"], str(interaction.user.id))
-    ahead = db.pending_request_count(conn) - 1
+    db.add_request(conn, row["id"], str(interaction.guild_id), str(interaction.user.id))
+    ahead = db.pending_request_count(conn, str(interaction.guild_id)) - 1
     when = "plays in the next block" if ahead <= 0 else f"{ahead} request(s) ahead of it"
     await interaction.response.send_message(
         f"Queued **{row['artist']} – {row['title']}** — {when}.", ephemeral=True

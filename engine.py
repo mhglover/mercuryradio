@@ -115,18 +115,10 @@ def _any(conn, artist_n):
     ).fetchone()
 
 
-def _request(conn, members, cutoff, artist_n, top_k):
-    """The oldest unplayed listener request. Bypasses timeout/artist guard — an
-    explicit request wins. Returns None (so the slot falls back) when none queued."""
-    return conn.execute(
-        "SELECT t.id, t.path, t.artist, t.title FROM requests req "
-        "JOIN tracks t ON t.id = req.track_id "
-        "WHERE req.played_at IS NULL ORDER BY req.requested_at ASC LIMIT 1"
-    ).fetchone()
-
-
+# 'request' is a block slot too, but it needs guild context and mutates a queue,
+# so the caller (bot) resolves it against db.next_request; the engine only scores
+# music. A 'request' slot with an empty queue falls back to a music pick.
 _PICKERS = {
-    "request": _request,
     "top": _top,
     "allpos": _allpos,
     "fresh": _fresh,

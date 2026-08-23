@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS options (
 CREATE TABLE IF NOT EXISTS requests (
     id           INTEGER PRIMARY KEY,
     track_id     INTEGER NOT NULL,
+    guild_id     TEXT,
     user_id      TEXT,
     requested_at TEXT NOT NULL,
     played_at    TEXT,
@@ -85,7 +86,17 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn) -> None:
+    # CREATE TABLE IF NOT EXISTS won't add a column to a table that predates it.
+    # requests.guild_id was added for multi-server (shared ratings, per-guild queue).
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(requests)")}
+    if "guild_id" not in cols:
+        conn.execute("ALTER TABLE requests ADD COLUMN guild_id TEXT")
+        conn.commit()
 
 
 def upsert_track(conn, artist, title, album, path, duration=None) -> int:
@@ -148,37 +159,41 @@ def search_tracks(conn, query: str, limit: int = 25) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def add_request(conn, track_id: int, user_id: str | None = None) -> None:
+def add_request(conn, track_id: int, guild_id: str, user_id: str | None = None) -> None:
     conn.execute(
-        "INSERT INTO requests (track_id, user_id, requested_at) VALUES (?, ?, ?)",
-        (track_id, user_id, _now()),
+        "INSERT INTO requests (track_id, guild_id, user_id, requested_at) VALUES (?, ?, ?, ?)",
+        (track_id, guild_id, user_id, _now()),
     )
     conn.commit()
 
 
-def next_request(conn) -> sqlite3.Row | None:
-    """The oldest unplayed request as a playable track row, or None."""
+def next_request(conn, guild_id: str) -> sqlite3.Row | None:
+    """The oldest unplayed request FOR THIS GUILD as a playable track row, or None.
+    Scoped per guild so a shared ratings DB doesn't bleed requests across servers."""
     return conn.execute(
         "SELECT t.id, t.path, t.artist, t.title FROM requests req "
         "JOIN tracks t ON t.id = req.track_id "
-        "WHERE req.played_at IS NULL ORDER BY req.requested_at ASC LIMIT 1"
+        "WHERE req.played_at IS NULL AND req.guild_id = ? "
+        "ORDER BY req.requested_at ASC LIMIT 1",
+        (guild_id,),
     ).fetchone()
 
 
-def mark_request_played(conn, track_id: int) -> None:
-    """Mark the oldest unplayed request for this track as played."""
+def mark_request_played(conn, track_id: int, guild_id: str) -> None:
+    """Mark the oldest unplayed request for this track IN THIS GUILD as played."""
     conn.execute(
         "UPDATE requests SET played_at = ? WHERE id = ("
-        "SELECT id FROM requests WHERE track_id = ? AND played_at IS NULL "
+        "SELECT id FROM requests WHERE track_id = ? AND guild_id = ? AND played_at IS NULL "
         "ORDER BY requested_at ASC LIMIT 1)",
-        (_now(), track_id),
+        (_now(), track_id, guild_id),
     )
     conn.commit()
 
 
-def pending_request_count(conn) -> int:
+def pending_request_count(conn, guild_id: str) -> int:
     return conn.execute(
-        "SELECT COUNT(*) AS n FROM requests WHERE played_at IS NULL"
+        "SELECT COUNT(*) AS n FROM requests WHERE played_at IS NULL AND guild_id = ?",
+        (guild_id,),
     ).fetchone()["n"]
 
 

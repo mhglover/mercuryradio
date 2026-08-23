@@ -1,0 +1,31 @@
+# Second Portainer stack — the same image, a DIFFERENT Discord server (Chizat).
+# Identical to compose.nas.yaml except the container name; ratings are SHARED by
+# pointing DATA_DIR at the SAME host dir as the Mercury Base stack, so every user's
+# ratings follow them across servers (Discord user ids are global). Requests are
+# scoped per guild in code, so the shared DB does not bleed requests between servers.
+#
+# Needs a SEPARATE bot token (a 2nd Discord application): one bot token opens one
+# gateway connection, so two stacks cannot share a token. Set in the stack's Environment:
+#   DISCORD_TOKEN         -> the 2nd app's token
+#   GUILD_ID              -> the Chizat server id
+#   VOICE_CHANNEL_ID      -> the Chizat voice channel to stream in
+#   NOWPLAYING_CHANNEL_ID -> the Chizat text channel for the card (optional)
+#   MUSIC_DIR             -> /volume1/@home/mhglover/Music   (same library, read-only)
+#   DATA_DIR              -> /volume1/docker/mercuryradio/data   (SAME as Mercury Base = shared ratings)
+services:
+  mercuryradio-chizat:
+    image: mercuryradio:latest
+    pull_policy: never
+    container_name: mercuryradio-chizat
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
+      GUILD_ID: ${GUILD_ID:?set GUILD_ID}
+      VOICE_CHANNEL_ID: ${VOICE_CHANNEL_ID:-}
+      NOWPLAYING_CHANNEL_ID: ${NOWPLAYING_CHANNEL_ID:-}
+      MUSIC_DIR: /music
+      DB_PATH: /data/mercuryradio.db
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${MUSIC_DIR:?set MUSIC_DIR to your library host path}:/music:ro
+      - ${DATA_DIR:?set DATA_DIR to the SHARED host dir for the SQLite DB}:/data

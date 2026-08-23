@@ -74,32 +74,23 @@ def test_new_block_shuffles_and_grows_with_backlog():
     assert grown.count("request") == 2
 
 
-def test_request_slot_plays_queue_then_falls_back():
+def test_request_queue_is_fifo_and_guild_scoped():
     conn, t, _ab = _seed()
-    for k in t:
-        db.set_rating(conn, "u1", t[k], db.LIKE)  # so 'top' has candidates
-    conn.commit()
-    # empty queue -> the request slot falls back to music (never None, never None-named)
-    row, name = engine.pick(conn, ["u1"], "request")
-    assert row is not None and name != "request"
-    # queued -> the request slot serves the queued track
-    db.add_request(conn, t[("C", "c1")], "u1")
-    row, name = engine.pick(conn, ["u1"], "request")
-    assert name == "request" and (row["artist"], row["title"]) == ("C", "c1")
-
-
-def test_request_queue_fifo_and_played():
-    conn, t, _ab = _seed()
-    assert db.next_request(conn) is None
-    db.add_request(conn, t[("C", "c1")], "u1")
-    db.add_request(conn, t[("D", "d1")], "u1")
-    r1 = db.next_request(conn)
-    assert (r1["artist"], r1["title"]) == ("C", "c1")  # FIFO
-    db.mark_request_played(conn, r1["id"])
-    r2 = db.next_request(conn)
+    g1, g2 = "guildA", "guildB"
+    assert db.next_request(conn, g1) is None
+    db.add_request(conn, t[("C", "c1")], g1, "u1")
+    db.add_request(conn, t[("D", "d1")], g1, "u1")
+    db.add_request(conn, t[("B", "b1")], g2, "u2")  # a request on the OTHER server
+    r1 = db.next_request(conn, g1)
+    assert (r1["artist"], r1["title"]) == ("C", "c1")  # FIFO within the guild
+    assert db.next_request(conn, g2)["title"] == "b1"  # g2 sees only its own
+    db.mark_request_played(conn, r1["id"], g1)
+    r2 = db.next_request(conn, g1)
     assert (r2["artist"], r2["title"]) == ("D", "d1")
-    db.mark_request_played(conn, r2["id"])
-    assert db.next_request(conn) is None
+    db.mark_request_played(conn, r2["id"], g1)
+    assert db.next_request(conn, g1) is None
+    assert db.pending_request_count(conn, g1) == 0
+    assert db.pending_request_count(conn, g2) == 1  # the other server's request is untouched
 
 
 def test_search_excludes_audiobooks():
@@ -116,8 +107,7 @@ if __name__ == "__main__":
         test_artist_guard_avoids_back_to_back,
         test_always_returns_something_when_library_nonempty,
         test_new_block_shuffles_and_grows_with_backlog,
-        test_request_slot_plays_queue_then_falls_back,
-        test_request_queue_fifo_and_played,
+        test_request_queue_is_fifo_and_guild_scoped,
         test_search_excludes_audiobooks,
     ):
         fn()
