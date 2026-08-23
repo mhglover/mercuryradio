@@ -38,6 +38,10 @@ FFMPEG_OPTS = {"options": "-vn"}
 # even if they never joined voice — for listeners sharing one speaker/connection.
 PRESENCE_WINDOW_MIN = 30
 
+# On wake (empty VC -> someone joins), start the first song this many seconds in,
+# so you drop into a track already playing rather than catching every one cold.
+WAKE_SEEK_SECONDS = 30
+
 # (label, rating value, colored square for the sidebar, button style)
 RATINGS = [
     ("Hate", db.HATE, "🟥", discord.ButtonStyle.danger),
@@ -78,10 +82,12 @@ def _ensure_opus() -> None:
     raise RuntimeError("libopus not found — install it (brew install opus / apt install libopus0)")
 
 
-async def _advance(vc: discord.VoiceClient) -> None:
+async def _advance(vc: discord.VoiceClient, seek: int = 0) -> None:
     """Compose and play the next track, scored over whoever is in the VC right
     now (the 'room'). Runs on the loop thread — db access is loop-thread-bound —
-    and the after-callback (worker thread) hops back here via run_coroutine_threadsafe."""
+    and the after-callback (worker thread) hops back here via run_coroutine_threadsafe.
+    `seek` starts the track that many seconds in — used on wake so a joiner drops
+    into a song already in progress, like tuning into a live station."""
     global _block, current_track, _current_row
     if not _active or not vc.is_connected():
         return
@@ -111,7 +117,10 @@ async def _advance(vc: discord.VoiceClient) -> None:
     _current_row = row
     current_track = f"{row['artist']} – {row['title']}"
     db.record_play(conn, row["id"], reason=picker)
-    source = discord.FFmpegPCMAudio(row["path"], **FFMPEG_OPTS)
+    opts = dict(FFMPEG_OPTS)
+    if seek > 0:
+        opts["before_options"] = f"-ss {seek}"  # input seek: start mid-song
+    source = discord.FFmpegPCMAudio(row["path"], **opts)
     vc.play(source, after=lambda err: _after(vc, err, row["path"]))
     await _post_nowplaying(vc.channel, row)
 
@@ -148,7 +157,8 @@ def _sync_playback(vc: discord.VoiceClient) -> None:
         if not _active:
             _active = True
             if _loop and not vc.is_playing():
-                _loop.create_task(_advance(vc))
+                # wake: drop the joiner into a song already in progress
+                _loop.create_task(_advance(vc, seek=WAKE_SEEK_SECONDS))
     elif _active:
         _active = False
         current_track = None
