@@ -13,11 +13,13 @@ config, and run/deploy.
   don't import it — mercury is Spotify/Postgres-bound). Key lines: `queue_manager.py:17-102` (block
   loop), `blocktypes.py:50,124` (pickers), `raters.py:235` (skip→rating).
 
-## Phase status
-1. ✅ join + stream one file · 2. ✅ continuous shuffle + `/skip` · 3. ⬜ ratings (5 buttons + live
-colored sidebar, SQLite) · 4. ⬜ selection engine over VC members (artist guard, 10-day timeout,
-wildcard = random-from-unrated) · 5. ⬜ requests + chat · 6. ⬜ polish. Rating scale is asymmetric:
-hate −4 · dislike −1 · shrug 0 · like +1 · love +2.
+## Phase status (resequenced 2026-08-22)
+1. ✅ stream one file · 2. ✅ continuous shuffle + `/skip`, deployed on NAS · 3. ✅ persistence
+(SQLite: tracks/users/ratings/play_history/options; tags-keyed tracks via mutagen) + Plex ★ seed
+(`seed_plex.py`, positive-only) · 4. ⬜ live sidebar + 5 rating buttons · 5. ⬜ selection engine
+over VC members (artist guard, 10-day timeout, wildcard = random-from-unrated) · 6. ⬜ chat +
+requests · someday: package for open source. Rating scale is asymmetric: hate −4 · dislike −1 ·
+shrug 0 · like +1 · love +2. Track identity = normalized artist|title|album (path is playback only).
 
 ## Hard rules
 - **Ships no music, no secrets.** `media/` and `.env` are gitignored. Config is env-only

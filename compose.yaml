@@ -12,7 +12,10 @@ services:
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
       GUILD_ID: ${GUILD_ID:?set GUILD_ID}
+      VOICE_CHANNEL_ID: ${VOICE_CHANNEL_ID:-}
       MUSIC_DIR: /music
+      DB_PATH: /data/mercuryradio.db
       PYTHONUNBUFFERED: "1"  # flush print() to the container log immediately
     volumes:
       - ${MUSIC_DIR:?set MUSIC_DIR to your library path}:/music:ro
+      - ${DATA_DIR:-./data}:/data

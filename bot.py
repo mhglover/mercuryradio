@@ -1,9 +1,9 @@
-"""mercuryradio — Phase 2: continuous block radio.
+"""mercuryradio — Phase 3: continuous radio backed by a persistent library.
 
-The bot joins a voice channel and streams a shuffled walk of a music library,
-chaining track to track so it never stops. `/skip` jumps to the next track.
-This is the flat-shuffle foundation the selection engine (Phase 4) will replace
-with rating-scored block composition.
+The bot scans MUSIC_DIR into a SQLite tracks table (tags via mutagen), then
+streams a shuffled walk of it, chaining track to track so it never stops. Ratings
+live in the same DB (seeded from Plex ★ by seed_plex.py). The rating-scored
+selection engine replaces the flat shuffle in Phase 5.
 
 Config comes from the environment (see .env.sample). No paths or tokens live in
 this file.
@@ -11,25 +11,32 @@ this file.
 
 import os
 import random
-from pathlib import Path
 
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
+
+import db
+import library
 
 load_dotenv()
 
 TOKEN = os.environ["DISCORD_TOKEN"]
 GUILD_ID = int(os.environ["GUILD_ID"])
 MUSIC_DIR = os.environ["MUSIC_DIR"]
-
-AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".wma"}
+# The channel the station broadcasts in. Set it and the bot auto-joins on
+# startup and /join targets it — no need for anyone to be in a channel first.
+# Unset: /join falls back to the caller's current voice channel.
+VOICE_CHANNEL_ID = int(os.environ.get("VOICE_CHANNEL_ID") or 0) or None
 
 # -vn drops any embedded cover-art video stream; audio only.
 FFMPEG_OPTS = {"options": "-vn"}
 
-# Single-guild state (this bot serves one private server).
-_playlist: list[str] = []
+# Single-guild state (this bot serves one private server). The playlist is an
+# in-memory shuffle of track rows loaded from the DB on the main thread, so the
+# after-callback worker thread never touches the SQLite connection.
+conn = None
+_playlist: list = []
 _pos = 0
 current_track: str | None = None
 
@@ -60,16 +67,19 @@ def _ensure_opus() -> None:
     raise RuntimeError("libopus not found — install it (brew install opus / apt install libopus0)")
 
 
-def _load_library() -> list[str]:
-    files = [str(p) for p in Path(MUSIC_DIR).rglob("*") if p.suffix.lower() in AUDIO_EXTS]
-    random.shuffle(files)
-    return files
+def _ensure_playlist() -> None:
+    global _playlist, _pos
+    if not _playlist:
+        _playlist = [dict(r) for r in db.all_tracks(conn)]
+        random.shuffle(_playlist)
+        _pos = 0
 
 
 def _play_next(vc: discord.VoiceClient) -> None:
     """Play the next track; reshuffle and wrap when the list is exhausted.
     Runs both at /join and from the after-callback (a worker thread) — calling
-    vc.play() from there is the supported discord.py chaining pattern.
+    vc.play() from there is the supported discord.py chaining pattern. Only
+    touches the in-memory _playlist, never the DB.
     """
     global _pos, current_track
     if not vc.is_connected() or not _playlist:
@@ -77,11 +87,11 @@ def _play_next(vc: discord.VoiceClient) -> None:
     if _pos >= len(_playlist):
         random.shuffle(_playlist)
         _pos = 0
-    path = _playlist[_pos]
+    row = _playlist[_pos]
     _pos += 1
-    current_track = Path(path).stem
-    source = discord.FFmpegPCMAudio(path, **FFMPEG_OPTS)
-    vc.play(source, after=lambda err: _after(vc, err, path))
+    current_track = f"{row['artist']} – {row['title']}"
+    source = discord.FFmpegPCMAudio(row["path"], **FFMPEG_OPTS)
+    vc.play(source, after=lambda err: _after(vc, err, row["path"]))
 
 
 def _after(vc: discord.VoiceClient, err: Exception | None, path: str) -> None:
@@ -99,33 +109,48 @@ guild = discord.Object(id=GUILD_ID)
 
 @client.event
 async def on_ready() -> None:
+    global conn
     _ensure_opus()
+    conn = db.connect()
+    count = library.scan(conn, MUSIC_DIR)
     await tree.sync(guild=guild)
-    print(f"mercuryradio up as {client.user}")
+    print(f"mercuryradio up as {client.user} — {count} tracks in the library")
+    if VOICE_CHANNEL_ID:
+        channel = client.get_channel(VOICE_CHANNEL_ID)
+        if isinstance(channel, discord.VoiceChannel):
+            vc = await channel.connect()
+            _ensure_playlist()
+            if _playlist:
+                _play_next(vc)
+            print(f"auto-joined {channel.name} — broadcasting")
+        else:
+            print(f"VOICE_CHANNEL_ID {VOICE_CHANNEL_ID} is not a reachable voice channel")
 
 
-@tree.command(name="join", description="Join your voice channel and start the radio.", guild=guild)
+@tree.command(name="join", description="Start the radio in the station's voice channel.", guild=guild)
 async def join(interaction: discord.Interaction) -> None:
-    global _playlist, _pos
-    voice = getattr(interaction.user, "voice", None)
-    if not voice or not voice.channel:
-        await interaction.response.send_message("Join a voice channel first.", ephemeral=True)
+    channel = client.get_channel(VOICE_CHANNEL_ID) if VOICE_CHANNEL_ID else None
+    if not isinstance(channel, discord.VoiceChannel):
+        voice = getattr(interaction.user, "voice", None)  # no configured channel → use the caller's
+        channel = voice.channel if voice else None
+    if channel is None:
+        await interaction.response.send_message(
+            "No station voice channel configured, and you're not in one.", ephemeral=True
+        )
         return
     vc = interaction.guild.voice_client
     if vc:
-        await vc.move_to(voice.channel)
+        await vc.move_to(channel)
     else:
-        vc = await voice.channel.connect()
+        vc = await channel.connect()
+    _ensure_playlist()
     if not _playlist:
-        _playlist = _load_library()
-        _pos = 0
-    if not _playlist:
-        await interaction.response.send_message(f"No audio files under {MUSIC_DIR}.", ephemeral=True)
+        await interaction.response.send_message(f"No tracks in the library ({MUSIC_DIR}).", ephemeral=True)
         return
     if not vc.is_playing():
         _play_next(vc)
     await interaction.response.send_message(
-        f"Radio on in {voice.channel.name} — {len(_playlist)} tracks.", ephemeral=True
+        f"Radio on in {channel.name} — {len(_playlist)} tracks.", ephemeral=True
     )
 
 

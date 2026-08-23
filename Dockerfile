@@ -6,7 +6,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN pip install --no-cache-dir "discord.py[voice]>=2.4" "python-dotenv>=1.0"
-COPY bot.py ./
+RUN pip install --no-cache-dir "discord.py[voice]>=2.4" "python-dotenv>=1.0" "mutagen>=1.47"
+COPY bot.py db.py library.py seed_plex.py ./
 
 CMD ["python", "bot.py"]

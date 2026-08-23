@@ -9,13 +9,19 @@ listener set.
 The code ships **no music** — you point it at your own library. Copyright posture of what you
 stream is yours to hold.
 
-## Status: Phase 2 — continuous radio
+## Status: Phase 3 — persistent library + ratings
 
-The bot joins a voice channel and streams a shuffled walk of your library, chaining track to
-track so it never stops. Commands: `/join`, `/skip`, `/nowplaying`, `/leave`.
+On startup the bot scans `MUSIC_DIR` into a SQLite library (tags via mutagen), auto-joins its
+configured voice channel, and streams a shuffled walk of the library, chaining track to track so
+it never stops. Ratings live in the same DB, seeded from Plex ★. Commands: `/join`, `/skip`,
+`/nowplaying`, `/leave`.
 
-Roadmap: (1) ✅ join + stream one file · (2) ✅ continuous shuffle + `/skip` · (3) ratings + live
-sidebar · (4) selection engine over VC members · (5) requests + chat · (6) polish.
+Roadmap: (1) ✅ stream one file · (2) ✅ continuous shuffle · (3) ✅ persistence + ratings ·
+(4) live sidebar + rating buttons · (5) selection engine over VC members · (6) chat + requests ·
+someday: package for open source.
+
+Ratings are per-user-per-track on an asymmetric scale that punishes the veto: hate −4, dislike −1,
+shrug 0, like +1, love +2.
 
 ## Config
 
@@ -23,32 +29,48 @@ Copy `.env.sample` to `.env` and set:
 
 - `DISCORD_TOKEN` — bot token from the Discord Developer Portal.
 - `GUILD_ID` — your server's id.
+- `VOICE_CHANNEL_ID` — the channel the station broadcasts in; the bot auto-joins it on startup.
+  Leave blank to make `/join` use the caller's current channel instead.
 - `MUSIC_DIR` — path to your music library (scanned recursively for `.flac .mp3 .m4a .aac .ogg
   .opus .wav .wma`).
+- `DB_PATH` / `DATA_DIR` — where the SQLite DB lives (local default `./data`).
 
 Invite the bot with the `bot` + `applications.commands` scopes and the **View Channels, Send
 Messages, Embed Links, Connect, Speak** permissions.
+
+## Seed ratings from Plex ★ (optional, one-shot)
+
+Import your existing Plex star ratings into the library. Positive-only mapping (Plex 0–10):
+`≥9`→love, `7–8`→like, `5–6`→shrug, `<5` skipped. Reads a copy of the Plex DB only (no token):
+
+```
+python seed_plex.py --plex-db /path/to/com.plexapp.plugins.library.db --owner <your_discord_user_id>
+```
+
+Run the bot at least once first so the library table is populated. `python test_seed.py` checks the
+mapping.
 
 ## Run locally
 
 Needs `ffmpeg` (and libopus) on PATH.
 
 ```
-cp .env.sample .env      # fill in the three values
+cp .env.sample .env      # fill it in
 uv run bot.py
 ```
 
-Then `/join` from a voice channel.
+With `VOICE_CHANNEL_ID` set the bot auto-joins and starts; otherwise `/join` from a voice channel.
 
 ## Run in Docker (alongside Plex/Tautulli/Transmission)
 
-No published ports — it only needs Discord egress and a read-only mount of your library. Set the
-three values in `.env`, then:
+No published ports — it only needs Discord egress, a read-only mount of your library, and a
+writable `/data` dir for the SQLite DB. Set the values in `.env`, then:
 
 ```
 docker compose up -d --build
 ```
 
-Or point Portainer at this repo as a stack (set `DISCORD_TOKEN`, `GUILD_ID`, `MUSIC_DIR` in the
-stack environment). The image bundles ffmpeg + libopus; the container mounts `MUSIC_DIR` read-only
-at `/music`.
+Or point Portainer at this repo as a stack (set `DISCORD_TOKEN`, `GUILD_ID`, `VOICE_CHANNEL_ID`,
+`MUSIC_DIR`, `DATA_DIR` in the stack environment; `deploy/compose.nas.yaml` is the image-based
+variant). The image bundles ffmpeg + libopus; `MUSIC_DIR` mounts read-only at `/music`, `DATA_DIR`
+at `/data`.
