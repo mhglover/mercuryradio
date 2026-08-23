@@ -116,6 +116,13 @@ def upsert_user(conn, user_id: str, name: str | None = None) -> None:
     )
 
 
+def get_rating(conn, user_id: str, track_id: int) -> int | None:
+    row = conn.execute(
+        "SELECT value FROM ratings WHERE user_id = ? AND track_id = ?", (str(user_id), track_id)
+    ).fetchone()
+    return row["value"] if row else None
+
+
 def set_rating(conn, user_id: str, track_id: int, value: int) -> None:
     conn.execute(
         "INSERT INTO ratings (user_id, track_id, value, updated) VALUES (?, ?, ?, ?) "

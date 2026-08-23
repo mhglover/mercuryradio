@@ -9,16 +9,18 @@ listener set.
 The code ships **no music** — you point it at your own library. Copyright posture of what you
 stream is yours to hold.
 
-## Status: Phase 3 — persistent library + ratings
+## Status: Phase 4 — now-playing card with live ratings
 
 On startup the bot scans `MUSIC_DIR` into a SQLite library (tags via mutagen) and auto-joins its
 configured voice channel. It streams a shuffled walk of the library **only while a human is in the
-channel** — silent when the room is empty, resuming when someone joins. Ratings live in the same
-DB, seeded from Plex ★. Commands: `/join`, `/skip`, `/nowplaying`, `/leave`.
+channel**. For each track it posts a **now-playing card** — album art, the track, five rating
+buttons (hate/dislike/shrug/like/love) and a **live colored sidebar** showing each present member's
+rating in its color — and sets its Discord presence to the track. Ratings live in the DB, seeded
+from Plex ★. Commands: `/join`, `/skip`, `/leave`.
 
 Roadmap: (1) ✅ stream one file · (2) ✅ continuous shuffle · (3) ✅ persistence + ratings ·
-(4) live sidebar + rating buttons · (5) selection engine over VC members · (6) chat + requests ·
-someday: package for open source.
+(4) ✅ now-playing card + rating buttons · (5) selection engine over VC members · (6) chat +
+requests · someday: package for open source.
 
 Ratings are per-user-per-track on an asymmetric scale that punishes the veto: hate −4, dislike −1,
 shrug 0, like +1, love +2.

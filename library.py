@@ -38,6 +38,29 @@ def _read_tags(path: str) -> tuple[str, str, str, float | None]:
     return artist or "Unknown Artist", title, album or "", duration
 
 
+def extract_cover(path: str) -> bytes | None:
+    """Return embedded cover-art image bytes for a track, or None. Handles FLAC
+    picture blocks and ID3 APIC frames; best-effort, never raises."""
+    try:
+        mf = mutagen.File(path)
+        if mf is None:
+            return None
+        pics = getattr(mf, "pictures", None)  # FLAC / Ogg
+        if pics:
+            return pics[0].data
+        tags = getattr(mf, "tags", None)
+        if tags:
+            for key in tags.keys():
+                if key.startswith("APIC"):  # ID3 embedded picture
+                    return tags[key].data
+            cov = tags.get("covr")  # MP4/M4A
+            if cov:
+                return bytes(cov[0])
+    except Exception:
+        return None
+    return None
+
+
 def scan(music_dir: str, db_path: str | None = None) -> int:
     """Walk music_dir, upsert every audio file. Returns the track count.
 
