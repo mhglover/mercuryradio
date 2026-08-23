@@ -11,10 +11,10 @@ stream is yours to hold.
 
 ## Status: Phase 3 — persistent library + ratings
 
-On startup the bot scans `MUSIC_DIR` into a SQLite library (tags via mutagen), auto-joins its
-configured voice channel, and streams a shuffled walk of the library, chaining track to track so
-it never stops. Ratings live in the same DB, seeded from Plex ★. Commands: `/join`, `/skip`,
-`/nowplaying`, `/leave`.
+On startup the bot scans `MUSIC_DIR` into a SQLite library (tags via mutagen) and auto-joins its
+configured voice channel. It streams a shuffled walk of the library **only while a human is in the
+channel** — silent when the room is empty, resuming when someone joins. Ratings live in the same
+DB, seeded from Plex ★. Commands: `/join`, `/skip`, `/nowplaying`, `/leave`.
 
 Roadmap: (1) ✅ stream one file · (2) ✅ continuous shuffle · (3) ✅ persistence + ratings ·
 (4) live sidebar + rating buttons · (5) selection engine over VC members · (6) chat + requests ·

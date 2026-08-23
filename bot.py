@@ -39,6 +39,7 @@ conn = None
 _playlist: list = []
 _pos = 0
 current_track: str | None = None
+_active = False  # True only while a human is listening; gates streaming
 
 
 def _ensure_opus() -> None:
@@ -82,7 +83,7 @@ def _play_next(vc: discord.VoiceClient) -> None:
     touches the in-memory _playlist, never the DB.
     """
     global _pos, current_track
-    if not vc.is_connected() or not _playlist:
+    if not _active or not vc.is_connected() or not _playlist:
         return
     if _pos >= len(_playlist):
         random.shuffle(_playlist)
@@ -97,7 +98,32 @@ def _play_next(vc: discord.VoiceClient) -> None:
 def _after(vc: discord.VoiceClient, err: Exception | None, path: str) -> None:
     if err:
         print(f"playback error on {path}: {err}")  # skip the bad file, keep going
-    _play_next(vc)
+    _play_next(vc)  # no-ops if _active went False (last listener left)
+
+
+def _listeners(channel) -> list:
+    """Non-bot members connected to the channel."""
+    return [m for m in getattr(channel, "members", []) if not m.bot]
+
+
+def _sync_playback(vc: discord.VoiceClient) -> None:
+    """Stream iff a human is in the channel. Called on join and on every voice
+    state change. Idempotent."""
+    global _active, current_track
+    if not vc or not vc.is_connected():
+        return
+    if _listeners(vc.channel):
+        if not _active:
+            _active = True
+            _ensure_playlist()
+            if _playlist and not vc.is_playing():
+                _play_next(vc)
+    else:
+        if _active:
+            _active = False
+            current_track = None
+            if vc.is_playing():
+                vc.stop()  # after-callback no-ops because _active is now False
 
 
 intents = discord.Intents.default()
@@ -119,12 +145,19 @@ async def on_ready() -> None:
         channel = client.get_channel(VOICE_CHANNEL_ID)
         if isinstance(channel, discord.VoiceChannel):
             vc = await channel.connect()
-            _ensure_playlist()
-            if _playlist:
-                _play_next(vc)
-            print(f"auto-joined {channel.name} — broadcasting")
+            _sync_playback(vc)  # starts only if someone's already listening
+            print(f"auto-joined {channel.name} — {'streaming' if _active else 'idle (empty)'}")
         else:
             print(f"VOICE_CHANNEL_ID {VOICE_CHANNEL_ID} is not a reachable voice channel")
+
+
+@client.event
+async def on_voice_state_update(member, before, after) -> None:
+    if member.bot:
+        return
+    vc = member.guild.voice_client
+    if vc and vc.is_connected():
+        _sync_playback(vc)  # start when someone arrives, stop when the room empties
 
 
 @tree.command(name="join", description="Start the radio in the station's voice channel.", guild=guild)
@@ -147,10 +180,10 @@ async def join(interaction: discord.Interaction) -> None:
     if not _playlist:
         await interaction.response.send_message(f"No tracks in the library ({MUSIC_DIR}).", ephemeral=True)
         return
-    if not vc.is_playing():
-        _play_next(vc)
+    _sync_playback(vc)
+    state = "on" if _active else "idle until someone joins"
     await interaction.response.send_message(
-        f"Radio on in {channel.name} — {len(_playlist)} tracks.", ephemeral=True
+        f"Radio {state} in {channel.name} — {len(_playlist)} tracks.", ephemeral=True
     )
 
 
