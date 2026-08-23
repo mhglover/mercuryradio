@@ -166,22 +166,14 @@ def _after(radio: GuildRadio, vc: discord.VoiceClient, err, path: str) -> None:
 
 
 def _sync_playback(radio: GuildRadio, vc: discord.VoiceClient) -> None:
-    """Stream iff a human is in this guild's VC. Idempotent."""
+    """Start streaming if a human is in the VC and we're not already playing.
+    Leaving an empty VC is handled by _reconcile_voice. Idempotent."""
     if not vc or not vc.is_connected():
         return
-    if _listeners(vc.channel):
-        if not radio.active:
-            radio.active = True
-            if _loop and not vc.is_playing():
-                _loop.create_task(_advance(radio, vc, seek=WAKE_SEEK_SECONDS))
-    elif radio.active:
-        radio.active = False
-        radio.current_track = None
-        radio.current_row = None
-        if vc.is_playing():
-            vc.stop()
-        if _loop:
-            asyncio.run_coroutine_threadsafe(_clear_nowplaying(radio), _loop)
+    if _listeners(vc.channel) and not radio.active:
+        radio.active = True
+        if _loop and not vc.is_playing():
+            _loop.create_task(_advance(radio, vc, seek=WAKE_SEEK_SECONDS))
 
 
 # ── now-playing card ────────────────────────────────────────────────────────
@@ -344,25 +336,37 @@ async def _rescan_bg() -> None:
         print(f"background rescan failed: {e}")
 
 
-async def _serve_guild(radio: GuildRadio) -> None:
-    """Connect to a guild's voice channel and start (or idle) its radio."""
+async def _reconcile_voice(radio: GuildRadio) -> None:
+    """The bot is in the VC only while a human is: join when someone's there,
+    leave when it empties — so it never sits alone in an empty channel."""
     if not radio.voice_channel_id:
         return
     channel = client.get_channel(radio.voice_channel_id)
     if not isinstance(channel, discord.VoiceChannel):
-        print(f"guild {radio.guild_id}: voice channel {radio.voice_channel_id} not reachable")
         return
     vc = channel.guild.voice_client
-    if vc is None:
-        try:
-            vc = await channel.connect()
-        except discord.ClientException:
-            vc = channel.guild.voice_client
-    elif vc.channel != channel:
-        await vc.move_to(channel)
-    if vc:
-        _sync_playback(radio, vc)
-        print(f"serving {channel.guild.name}/{channel.name} — {'streaming' if radio.active else 'idle (empty)'}")
+    if _listeners(channel):
+        if vc is None or not vc.is_connected():
+            try:
+                vc = await channel.connect()
+            except discord.ClientException:
+                vc = channel.guild.voice_client
+        elif vc.channel != channel:
+            await vc.move_to(channel)
+        if vc:
+            _sync_playback(radio, vc)
+    elif vc and vc.is_connected():  # emptied out -> leave
+        radio.active = False
+        await _clear_nowplaying(radio, clear_status=False)
+        await vc.disconnect()
+
+
+async def _serve_guild(radio: GuildRadio) -> None:
+    """Join iff a listener is already present on boot; otherwise wait for one."""
+    await _reconcile_voice(radio)
+    ch = client.get_channel(radio.voice_channel_id) if radio.voice_channel_id else None
+    where = f"{ch.guild.name}/{ch.name}" if isinstance(ch, discord.VoiceChannel) else str(radio.guild_id)
+    print(f"serving {where} — {'streaming' if radio.active else 'waiting for a listener'}")
 
 
 async def _sync_commands_to(guild) -> None:
@@ -413,10 +417,8 @@ async def on_voice_state_update(member, before, after) -> None:
     radio = _radio(member.guild.id)
     if radio is None:
         return
-    vc = member.guild.voice_client
-    if vc and vc.is_connected():
-        _sync_playback(radio, vc)
-        await _refresh_sidebar(radio)
+    await _reconcile_voice(radio)  # join when a listener arrives, leave when empty
+    await _refresh_sidebar(radio)
 
 
 @tree.command(name="setup", description="Register this server's radio (admin).")
@@ -446,25 +448,16 @@ async def join(interaction: discord.Interaction) -> None:
     if radio is None:
         await interaction.response.send_message("This server isn't set up — an admin runs /setup first.", ephemeral=True)
         return
-    channel = client.get_channel(radio.voice_channel_id) if radio.voice_channel_id else None
-    if not isinstance(channel, discord.VoiceChannel):
-        voice = getattr(interaction.user, "voice", None)
-        channel = voice.channel if voice else None
-    if channel is None:
-        await interaction.response.send_message("No station voice channel, and you're not in one.", ephemeral=True)
-        return
-    vc = interaction.guild.voice_client
-    if vc:
-        await vc.move_to(channel)
-    else:
-        vc = await channel.connect()
-    count = db.music_count(conn)
-    if not count:
+    if not db.music_count(conn):
         await interaction.response.send_message(f"No tracks in the library ({MUSIC_DIR}).", ephemeral=True)
         return
-    _sync_playback(radio, vc)
-    state = "on" if radio.active else "idle until someone joins"
-    await interaction.response.send_message(f"Radio {state} in {channel.name} — {count} tracks.", ephemeral=True)
+    await _reconcile_voice(radio)  # joins iff a listener is in the station channel
+    if radio.active:
+        await interaction.response.send_message("Radio's on.", ephemeral=True)
+    else:
+        await interaction.response.send_message(
+            "Join the station voice channel and the radio starts automatically.", ephemeral=True
+        )
 
 
 @tree.command(name="skip", description="Skip to the next track.")
