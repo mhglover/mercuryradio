@@ -239,21 +239,33 @@ guild = discord.Object(id=GUILD_ID)
 
 @client.event
 async def on_ready() -> None:
+    # on_ready fires on every gateway (re)connect — make it idempotent: scan the
+    # library once, and connect to voice only if not already connected.
     global conn, _loop
     _ensure_opus()
     _loop = asyncio.get_running_loop()
-    conn = db.connect()
-    count = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
-    await tree.sync(guild=guild)
-    print(f"mercuryradio up as {client.user} — {count} tracks in the library")
-    if VOICE_CHANNEL_ID:
-        channel = client.get_channel(VOICE_CHANNEL_ID)
-        if isinstance(channel, discord.VoiceChannel):
+    if conn is None:
+        conn = db.connect()
+        count = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
+        await tree.sync(guild=guild)
+        print(f"mercuryradio up as {client.user} — {count} tracks in the library")
+    if not VOICE_CHANNEL_ID:
+        return
+    channel = client.get_channel(VOICE_CHANNEL_ID)
+    if not isinstance(channel, discord.VoiceChannel):
+        print(f"VOICE_CHANNEL_ID {VOICE_CHANNEL_ID} is not a reachable voice channel")
+        return
+    vc = channel.guild.voice_client
+    if vc is None:
+        try:
             vc = await channel.connect()
-            _sync_playback(vc)
-            print(f"auto-joined {channel.name} — {'streaming' if _active else 'idle (empty)'}")
-        else:
-            print(f"VOICE_CHANNEL_ID {VOICE_CHANNEL_ID} is not a reachable voice channel")
+        except discord.ClientException:
+            vc = channel.guild.voice_client  # a reconnect raced us; reuse it
+    elif vc.channel != channel:
+        await vc.move_to(channel)
+    if vc:
+        _sync_playback(vc)
+        print(f"auto-joined {channel.name} — {'streaming' if _active else 'idle (empty)'}")
 
 
 @client.event
