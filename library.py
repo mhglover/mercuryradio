@@ -38,13 +38,21 @@ def _read_tags(path: str) -> tuple[str, str, str, float | None]:
     return artist or "Unknown Artist", title, album or "", duration
 
 
-def scan(conn, music_dir: str) -> int:
-    """Walk music_dir, upsert every audio file. Returns the track count."""
+def scan(music_dir: str, db_path: str | None = None) -> int:
+    """Walk music_dir, upsert every audio file. Returns the track count.
+
+    Opens its own DB connection so it can run in a thread executor (off the
+    asyncio loop) — a 7k-file mutagen walk must not block discord's heartbeat.
+    """
     import db
 
-    for p in Path(music_dir).rglob("*"):
-        if p.suffix.lower() in AUDIO_EXTS and p.is_file():
-            artist, title, album, duration = _read_tags(str(p))
-            db.upsert_track(conn, artist, title, album, str(p), duration)
-    conn.commit()
-    return conn.execute("SELECT COUNT(*) AS n FROM tracks").fetchone()["n"]
+    conn = db.connect(db_path)
+    try:
+        for p in Path(music_dir).rglob("*"):
+            if p.suffix.lower() in AUDIO_EXTS and p.is_file():
+                artist, title, album, duration = _read_tags(str(p))
+                db.upsert_track(conn, artist, title, album, str(p), duration)
+        conn.commit()
+        return conn.execute("SELECT COUNT(*) AS n FROM tracks").fetchone()["n"]
+    finally:
+        conn.close()

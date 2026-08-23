@@ -9,6 +9,7 @@ Config comes from the environment (see .env.sample). No paths or tokens live in
 this file.
 """
 
+import asyncio
 import os
 import random
 
@@ -138,7 +139,9 @@ async def on_ready() -> None:
     global conn
     _ensure_opus()
     conn = db.connect()
-    count = library.scan(conn, MUSIC_DIR)
+    # Scan off the event loop — a 7k-file mutagen walk would otherwise block the
+    # gateway heartbeat and trigger a reconnect (which restarts the scan).
+    count = await asyncio.get_running_loop().run_in_executor(None, library.scan, MUSIC_DIR)
     await tree.sync(guild=guild)
     print(f"mercuryradio up as {client.user} — {count} tracks in the library")
     if VOICE_CHANNEL_ID:
