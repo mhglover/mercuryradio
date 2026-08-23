@@ -390,6 +390,13 @@ async def on_ready() -> None:
         if not db.list_guilds(conn) and _SEED_GUILD_ID:
             db.upsert_guild(conn, _SEED_GUILD_ID, _SEED_VOICE_ID, _SEED_NP_ID)
             print(f"seeded guild {_SEED_GUILD_ID} from env")
+        # This app was reused from an earlier project (OpenClaw) whose slash commands
+        # were registered GLOBALLY and still show. Wipe stale global commands (ours
+        # are registered per-guild below, so this leaves them intact).
+        try:
+            await client.http.bulk_upsert_global_commands(client.application_id, [])
+        except discord.HTTPException as e:
+            print(f"could not clear stale global commands: {e}")
         for g in client.guilds:  # instant command availability in every joined guild
             await _sync_commands_to(g)
         if db.music_count(conn) > 0:
