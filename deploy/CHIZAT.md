@@ -1,3 +1,7 @@
+> ⚠️ **SUPERSEDED by multi-tenant.** The bot now serves many servers from ONE process/token —
+> just run `/setup` in the new server (see README "Multiple servers"). The two-token, second-stack
+> approach below is kept for reference only; you don't need it.
+
 # Deploying to a second Discord server (Chizat)
 
 Most of the restored shasradio users live on the Chizat Discord. This runs a second

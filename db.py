@@ -62,6 +62,25 @@ CREATE TABLE IF NOT EXISTS requests (
     played_at    TEXT,
     FOREIGN KEY (track_id) REFERENCES tracks(id)
 );
+-- Multi-tenant: one process serves every guild in this table. Config that was
+-- per-stack env (voice/card channel) lives here so a server is added by data,
+-- not a redeploy. Ratings + tracks stay shared (a user's taste follows them).
+CREATE TABLE IF NOT EXISTS guilds (
+    guild_id              TEXT PRIMARY KEY,
+    voice_channel_id      TEXT,
+    nowplaying_channel_id TEXT,
+    music_dir             TEXT,
+    enabled               INTEGER NOT NULL DEFAULT 1,
+    added                 TEXT NOT NULL
+);
+-- Per-guild presence: a rating touches (user, guild) so a recent rating counts
+-- the user present in THAT server only (scoped, unlike the shared ratings).
+CREATE TABLE IF NOT EXISTS presence (
+    user_id  TEXT NOT NULL,
+    guild_id TEXT NOT NULL,
+    seen_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, guild_id)
+);
 """
 
 
@@ -203,6 +222,61 @@ def upsert_user(conn, user_id: str, name: str | None = None) -> None:
         "ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, users.name)",
         (str(user_id), name),
     )
+
+
+def list_guilds(conn) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT guild_id, voice_channel_id, nowplaying_channel_id, music_dir "
+        "FROM guilds WHERE enabled = 1"
+    ).fetchall()
+
+
+def get_guild(conn, guild_id) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT guild_id, voice_channel_id, nowplaying_channel_id, music_dir "
+        "FROM guilds WHERE guild_id = ? AND enabled = 1",
+        (str(guild_id),),
+    ).fetchone()
+
+
+def upsert_guild(conn, guild_id, voice_channel_id, nowplaying_channel_id=None, music_dir=None) -> None:
+    conn.execute(
+        "INSERT INTO guilds (guild_id, voice_channel_id, nowplaying_channel_id, music_dir, enabled, added) "
+        "VALUES (?, ?, ?, ?, 1, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET voice_channel_id=excluded.voice_channel_id, "
+        "nowplaying_channel_id=excluded.nowplaying_channel_id, music_dir=excluded.music_dir, enabled=1",
+        (str(guild_id), str(voice_channel_id) if voice_channel_id else None,
+         str(nowplaying_channel_id) if nowplaying_channel_id else None, music_dir, _now()),
+    )
+    conn.commit()
+
+
+def disable_guild(conn, guild_id) -> None:
+    conn.execute("UPDATE guilds SET enabled = 0 WHERE guild_id = ?", (str(guild_id),))
+    conn.commit()
+
+
+def touch_presence(conn, user_id, guild_id) -> None:
+    """Mark a user seen in a guild (called on every rating) — a recent touch is
+    presence, scoped to that server."""
+    conn.execute(
+        "INSERT INTO presence (user_id, guild_id, seen_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(user_id, guild_id) DO UPDATE SET seen_at = excluded.seen_at",
+        (str(user_id), str(guild_id), _now()),
+    )
+    conn.commit()
+
+
+def present_since(conn, guild_id, minutes: int) -> list[sqlite3.Row]:
+    """(user_id, name) seen in THIS guild within the window — presence-by-rating,
+    per server so it doesn't bleed across tenants."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    return conn.execute(
+        "SELECT p.user_id AS user_id, COALESCE(u.name, p.user_id) AS name "
+        "FROM presence p LEFT JOIN users u ON u.id = p.user_id "
+        "WHERE p.guild_id = ? AND p.seen_at > ?",
+        (str(guild_id), cutoff),
+    ).fetchall()
 
 
 def recent_raters(conn, minutes: int) -> list[sqlite3.Row]:

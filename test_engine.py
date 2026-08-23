@@ -115,6 +115,27 @@ def test_recent_raters_is_presence_window():
     assert db.recent_raters(conn, 0) == []  # a zero window means nobody is recent
 
 
+def test_presence_is_scoped_per_guild():
+    conn = db.connect(":memory:")
+    db.upsert_user(conn, "u1", "Ann")
+    db.touch_presence(conn, "u1", "gA")
+    assert {r["user_id"] for r in db.present_since(conn, "gA", 30)} == {"u1"}
+    assert db.present_since(conn, "gB", 30) == []  # present in gA only, not gB
+    assert db.present_since(conn, "gA", 0) == []   # zero window -> nobody
+    assert db.present_since(conn, "gA", 30)[0]["name"] == "Ann"
+
+
+def test_guilds_table_crud():
+    conn = db.connect(":memory:")
+    assert db.list_guilds(conn) == []
+    db.upsert_guild(conn, "123", "456", "789")
+    g = db.get_guild(conn, "123")
+    assert g["voice_channel_id"] == "456" and g["nowplaying_channel_id"] == "789"
+    assert len(db.list_guilds(conn)) == 1
+    db.disable_guild(conn, "123")
+    assert db.list_guilds(conn) == [] and db.get_guild(conn, "123") is None
+
+
 if __name__ == "__main__":
     for fn in (
         test_top_scores_over_present_members,
@@ -126,6 +147,8 @@ if __name__ == "__main__":
         test_request_queue_is_fifo_and_guild_scoped,
         test_search_excludes_audiobooks,
         test_recent_raters_is_presence_window,
+        test_presence_is_scoped_per_guild,
+        test_guilds_table_crud,
     ):
         fn()
         print(f"ok {fn.__name__}")

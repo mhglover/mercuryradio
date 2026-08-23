@@ -13,7 +13,9 @@ services:
     restart: unless-stopped
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
-      GUILD_ID: ${GUILD_ID:?set GUILD_ID}
+      # Optional: these seed the FIRST server from env on a fresh DB. Otherwise add
+      # servers with /setup — config lives in the DB and one process serves many.
+      GUILD_ID: ${GUILD_ID:-}
       VOICE_CHANNEL_ID: ${VOICE_CHANNEL_ID:-}
       NOWPLAYING_CHANNEL_ID: ${NOWPLAYING_CHANNEL_ID:-}
       MUSIC_DIR: /music

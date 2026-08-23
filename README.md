@@ -30,15 +30,26 @@ shrug 0, like +1, love +2.
 Copy `.env.sample` to `.env` and set:
 
 - `DISCORD_TOKEN` — bot token from the Discord Developer Portal.
-- `GUILD_ID` — your server's id.
-- `VOICE_CHANNEL_ID` — the channel the station broadcasts in; the bot auto-joins it on startup.
-  Leave blank to make `/join` use the caller's current channel instead.
 - `MUSIC_DIR` — path to your music library (scanned recursively for `.flac .mp3 .m4a .aac .ogg
   .opus .wav .wma`).
 - `DB_PATH` / `DATA_DIR` — where the SQLite DB lives (local default `./data`).
+- `GUILD_ID` / `VOICE_CHANNEL_ID` / `NOWPLAYING_CHANNEL_ID` — **optional**, seed-only (see below).
 
 Invite the bot with the `bot` + `applications.commands` scopes and the **View Channels, Send
-Messages, Embed Links, Connect, Speak** permissions.
+Messages, Embed Links, Connect, Speak, Manage Channels** permissions.
+
+## Multiple servers (multi-tenant)
+
+One process, one bot token, many servers. Per-server config (voice + card channel) lives in the
+DB, not env — **add a server by running `/setup` in it** (needs Manage Server): pick the voice
+channel to stream in and, optionally, a text channel for the now-playing card. The bot joins and
+starts serving that server immediately — no redeploy, no second token.
+
+**Ratings and the track library are shared** across every server, so a listener's taste follows
+them wherever they are. Requests and presence-by-rating are scoped per server.
+
+For a simple single-server deploy you can skip `/setup` and set `GUILD_ID` / `VOICE_CHANNEL_ID` /
+`NOWPLAYING_CHANNEL_ID` in env instead — they seed the first server row on a fresh DB.
 
 ## Seed ratings from Plex ★ (optional, one-shot)
 
