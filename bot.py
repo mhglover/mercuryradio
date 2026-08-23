@@ -14,6 +14,7 @@ import asyncio
 import io
 import os
 import random
+import signal
 
 import discord
 from discord import app_commands
@@ -212,6 +213,12 @@ async def _post_nowplaying(voice_channel, row: dict) -> None:
         )
     except discord.HTTPException:
         pass
+    # Reflect the track in the channel topic. Best-effort: Discord throttles channel
+    # edits to ~2 per 10 min, so on short tracks the topic lags the card and presence.
+    try:
+        await channel.edit(topic=f"🎵 {row['artist']} – {row['title']}")
+    except (discord.HTTPException, AttributeError) as e:
+        print(f"could not set channel topic: {e}")
 
 
 async def _clear_nowplaying() -> None:
@@ -230,9 +237,44 @@ async def _clear_nowplaying() -> None:
 
 # ── discord wiring ──────────────────────────────────────────────────────────
 
+
+async def _announce_shutdown() -> None:
+    """Post an off-air notice to the card channel before the gateway closes."""
+    ch = client.get_channel(NOWPLAYING_CHANNEL_ID) if NOWPLAYING_CHANNEL_ID else None
+    if ch is None and VOICE_CHANNEL_ID:
+        ch = client.get_channel(VOICE_CHANNEL_ID)
+    if ch is None:
+        return
+    try:
+        await _clear_nowplaying()
+        await ch.send("📻 Mercury Radio is going off the air — back soon.")
+    except discord.HTTPException:
+        pass
+
+
+class MercuryClient(discord.Client):
+    _shutdown_announced = False
+
+    async def setup_hook(self) -> None:
+        # docker stop/restart sends SIGTERM; asyncio.run doesn't trap it, so the
+        # normal close() path never runs. Bridge SIGTERM -> close() ourselves.
+        try:
+            self.loop.add_signal_handler(
+                signal.SIGTERM, lambda: self.loop.create_task(self.close())
+            )
+        except (NotImplementedError, RuntimeError):
+            pass  # no signal support on this platform
+
+    async def close(self) -> None:
+        if not self._shutdown_announced:
+            self._shutdown_announced = True
+            await _announce_shutdown()
+        await super().close()
+
+
 intents = discord.Intents.default()
 intents.voice_states = True
-client = discord.Client(intents=intents)
+client = MercuryClient(intents=intents)
 tree = app_commands.CommandTree(client)
 guild = discord.Object(id=GUILD_ID)
 
