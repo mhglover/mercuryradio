@@ -7,6 +7,6 @@ RUN apt-get update \
 
 WORKDIR /app
 RUN pip install --no-cache-dir "discord.py[voice]>=2.4" "python-dotenv>=1.0" "mutagen>=1.47"
-COPY bot.py db.py library.py seed_plex.py ./
+COPY bot.py db.py engine.py library.py seed_plex.py ./
 
 CMD ["python", "bot.py"]
