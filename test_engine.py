@@ -99,6 +99,22 @@ def test_search_excludes_audiobooks():
     assert hits == []
 
 
+def test_recent_raters_is_presence_window():
+    conn, t, _ab = _seed()
+    db.upsert_user(conn, "u1", "Ann")
+    db.set_rating(conn, "u1", t[("A", "a1")], db.LIKE)  # updated = now
+    # u2 rated long ago -> outside the window, not present
+    conn.execute(
+        "INSERT INTO ratings (user_id, track_id, value, updated) VALUES (?, ?, ?, ?)",
+        ("u2", t[("B", "b1")], db.LOVE, "2000-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    got = {r["user_id"]: r["name"] for r in db.recent_raters(conn, 30)}
+    assert "u1" in got and "u2" not in got
+    assert got["u1"] == "Ann"  # display name comes from the users table
+    assert db.recent_raters(conn, 0) == []  # a zero window means nobody is recent
+
+
 if __name__ == "__main__":
     for fn in (
         test_top_scores_over_present_members,
@@ -109,6 +125,7 @@ if __name__ == "__main__":
         test_new_block_shuffles_and_grows_with_backlog,
         test_request_queue_is_fifo_and_guild_scoped,
         test_search_excludes_audiobooks,
+        test_recent_raters_is_presence_window,
     ):
         fn()
         print(f"ok {fn.__name__}")

@@ -9,7 +9,7 @@ only for playback.
 import os
 import sqlite3
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DB_PATH = os.environ.get("DB_PATH", "data/mercuryradio.db")
 
@@ -203,6 +203,20 @@ def upsert_user(conn, user_id: str, name: str | None = None) -> None:
         "ON CONFLICT(id) DO UPDATE SET name = COALESCE(excluded.name, users.name)",
         (str(user_id), name),
     )
+
+
+def recent_raters(conn, minutes: int) -> list[sqlite3.Row]:
+    """(user_id, name) for everyone who rated within the last `minutes` — a recent
+    rating signals presence, so a listener on a shared speaker counts without
+    joining voice. name falls back to the id when we've never stored one."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    return conn.execute(
+        "SELECT r.user_id AS user_id, COALESCE(u.name, r.user_id) AS name "
+        "FROM (SELECT user_id, MAX(updated) AS last FROM ratings GROUP BY user_id) r "
+        "LEFT JOIN users u ON u.id = r.user_id "
+        "WHERE r.last > ?",
+        (cutoff,),
+    ).fetchall()
 
 
 def get_rating(conn, user_id: str, track_id: int) -> int | None:

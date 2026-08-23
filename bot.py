@@ -34,6 +34,10 @@ NOWPLAYING_CHANNEL_ID = int(os.environ.get("NOWPLAYING_CHANNEL_ID") or 0) or Non
 
 FFMPEG_OPTS = {"options": "-vn"}
 
+# A rating within this window counts a user as present (for scoring + the sidebar)
+# even if they never joined voice — for listeners sharing one speaker/connection.
+PRESENCE_WINDOW_MIN = 30
+
 # (label, rating value, colored square for the sidebar, button style)
 RATINGS = [
     ("Hate", db.HATE, "🟥", discord.ButtonStyle.danger),
@@ -81,10 +85,10 @@ async def _advance(vc: discord.VoiceClient) -> None:
     global _block, current_track, _current_row
     if not _active or not vc.is_connected():
         return
-    members = _listeners(vc.channel)
-    if not members:
-        return
-    member_ids = [str(m.id) for m in members]
+    if not _listeners(vc.channel):
+        return  # streaming gate: at least one human must be in the VC to stream
+    present = _present(vc.channel)
+    member_ids = [uid for uid, _ in present]  # VC members + recent raters
     gid = str(vc.channel.guild.id)
     # Pop the next type from the shuffled block; when it empties, compose a fresh
     # one sized to this guild's request backlog (shasradio: a 6th request slot at
@@ -124,6 +128,17 @@ def _listeners(channel) -> list:
     return [m for m in getattr(channel, "members", []) if not m.bot]
 
 
+def _present(voice_channel):
+    """Present listeners = everyone in the VC + anyone who rated within
+    PRESENCE_WINDOW_MIN. A recent rating signals presence, so a listener sharing
+    one speaker (or on the text channel) counts without joining voice. Returns
+    [(user_id_str, display_name)], VC members first, deduped."""
+    present = {str(m.id): m.display_name for m in _listeners(voice_channel)}
+    for r in db.recent_raters(conn, PRESENCE_WINDOW_MIN):
+        present.setdefault(r["user_id"], r["name"])
+    return list(present.items())
+
+
 def _sync_playback(vc: discord.VoiceClient) -> None:
     """Stream iff a human is in the channel. Idempotent."""
     global _active, current_track, _current_row
@@ -146,13 +161,13 @@ def _sync_playback(vc: discord.VoiceClient) -> None:
 
 # ── now-playing card ────────────────────────────────────────────────────────
 
-def _sidebar(channel, track_id: int) -> str:
-    """One line per present member: their rating square (or ⬛ if unrated)."""
+def _sidebar(voice_channel, track_id: int) -> str:
+    """One line per present listener (VC + recent raters): their rating square."""
     lines = []
-    for m in _listeners(channel):
-        val = db.get_rating(conn, m.id, track_id)
+    for uid, name in _present(voice_channel):
+        val = db.get_rating(conn, uid, track_id)
         square = _SQUARE.get(val, UNRATED) if val is not None else UNRATED
-        lines.append(f"{square} {m.display_name}")
+        lines.append(f"{square} {name}")
     return "\n".join(lines) or "_nobody here_"
 
 
@@ -194,11 +209,15 @@ class _RatingButton(discord.ui.Button):
 
 
 async def _refresh_sidebar() -> None:
-    """Rebuild the sidebar on the current card (keeps art + buttons)."""
+    """Rebuild the sidebar on the current card (keeps art + buttons). Reads the
+    VOICE channel for presence, not the card's text channel."""
     if _np_message is None or _current_row is None:
         return
+    guild = _np_message.guild
+    vc = guild.voice_client if guild else None
+    voice_channel = vc.channel if vc else _np_message.channel
     embed = _np_message.embeds[0]
-    embed.set_field_at(0, name="Ratings", value=_sidebar(_np_message.channel, _current_row["id"]), inline=False)
+    embed.set_field_at(0, name="Ratings", value=_sidebar(voice_channel, _current_row["id"]), inline=False)
     try:
         await _np_message.edit(embed=embed)
     except discord.HTTPException:
