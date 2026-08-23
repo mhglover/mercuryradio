@@ -25,22 +25,25 @@ import sqlite3
 
 import db
 
-# Plex track ratings live in metadata_item_settings, keyed by guid 'local://<id>'
-# where <id> is the track's metadata_items.id. Join up to the file, and sideways
-# to album/artist titles via parent_id for the tag fallback.
+# Plex track ratings live in metadata_item_settings, joined to the track by GUID
+# (metadata_items.guid = mis.guid). Most tracks carry a matched 'plex://track/...'
+# guid, not 'local://<id>' — measured 5,996 matches via guid vs 575 via local://id.
+# Join up to the file, and sideways to album/artist titles via parent_id for the
+# tag fallback. DISTINCT because a guid can map to duplicate metadata_items.
 PLEX_QUERY = """
-SELECT mp.file        AS file,
+SELECT DISTINCT
+       mp.file        AS file,
        mis.rating     AS rating,
        track.title    AS title,
        album.title    AS album,
        artist.title   AS artist
 FROM metadata_item_settings mis
-JOIN metadata_items track   ON mis.guid = 'local://' || track.id
+JOIN metadata_items track   ON track.guid = mis.guid AND track.metadata_type = 10
 LEFT JOIN media_items medi  ON medi.metadata_item_id = track.id
 LEFT JOIN media_parts mp    ON mp.media_item_id = medi.id
 LEFT JOIN metadata_items album  ON track.parent_id = album.id
 LEFT JOIN metadata_items artist ON album.parent_id = artist.id
-WHERE mis.rating > 0 AND track.metadata_type = 10
+WHERE mis.rating > 0
 """
 
 
