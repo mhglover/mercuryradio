@@ -9,6 +9,10 @@ services:
     image: mercuryradio
     container_name: mercuryradio
     restart: unless-stopped
+    # Graceful shutdown: on redeploy the bot finishes the current song before
+    # exiting (see DRAIN_TIMEOUT in bot.py). Give docker time to let it, or it
+    # SIGKILLs after the 10s default and cuts the song.
+    stop_grace_period: 330s
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
       GUILD_ID: ${GUILD_ID:?set GUILD_ID}

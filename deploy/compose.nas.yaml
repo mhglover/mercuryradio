@@ -11,6 +11,9 @@ services:
     pull_policy: never
     container_name: mercuryradio
     restart: unless-stopped
+    # Finish the current song before exiting on redeploy (DRAIN_TIMEOUT in bot.py);
+    # docker SIGKILLs after 10s by default, so give it room.
+    stop_grace_period: 330s
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN}
       # Optional: these seed the FIRST server from env on a fresh DB. Otherwise add

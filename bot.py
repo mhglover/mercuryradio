@@ -61,6 +61,8 @@ UNRATED = "⬛"
 
 conn = None
 _loop = None
+_draining = False  # set on shutdown: finish the current song, pick no more, then close
+DRAIN_TIMEOUT = 300  # cap the graceful wait (s) so a long/stuck track can't stall the deploy
 
 
 class GuildRadio:
@@ -130,6 +132,8 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
     """Compose and play the next track for this guild, scored over whoever is
     present. Runs on the loop thread; the after-callback hops back via
     run_coroutine_threadsafe. `seek` starts the track that many seconds in (wake)."""
+    if _draining:
+        return  # shutting down — let the current song finish, start no new one
     if not radio.active or not vc.is_connected():
         return
     if not _listeners(vc.channel):
@@ -166,7 +170,7 @@ def _after(radio: GuildRadio, vc: discord.VoiceClient, err, path: str) -> None:
     # Runs on discord's audio worker thread — schedule the next pick onto the loop.
     if err:
         print(f"playback error on {path}: {err}")
-    if _loop:
+    if _loop and not _draining:  # while draining, don't queue another track
         asyncio.run_coroutine_threadsafe(_advance(radio, vc), _loop)
 
 
@@ -298,6 +302,17 @@ async def _clear_nowplaying(radio: GuildRadio, clear_status: bool = True) -> Non
 # ── discord wiring ──────────────────────────────────────────────────────────
 
 
+async def _drain_playback() -> None:
+    """Graceful shutdown: stop picking new tracks (via _draining) and wait for the
+    songs already playing to finish, so a redeploy never cuts a song mid-play.
+    Bounded by DRAIN_TIMEOUT; returns at once when nothing is playing (idle)."""
+    for _ in range(DRAIN_TIMEOUT):
+        if not any(vc.is_playing() for vc in client.voice_clients):
+            return
+        await asyncio.sleep(1)
+    print("drain timeout — closing with a track still playing")
+
+
 async def _clear_cards_on_shutdown() -> None:
     """Delete the now-playing cards on shutdown so a (seconds-long) restart doesn't
     leave orphaned cards with dead buttons behind. No off-air announcement — that
@@ -320,8 +335,11 @@ class MercuryClient(discord.Client):
             pass
 
     async def close(self) -> None:
+        global _draining
         if not self._shutdown_done:
             self._shutdown_done = True
+            _draining = True          # stop picking the next track
+            await _drain_playback()   # let the song that's playing finish
             await _clear_cards_on_shutdown()
         await super().close()
 
