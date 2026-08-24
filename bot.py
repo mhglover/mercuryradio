@@ -306,8 +306,13 @@ async def _drain_playback() -> None:
     """Graceful shutdown: stop picking new tracks (via _draining) and wait for the
     songs already playing to finish, so a redeploy never cuts a song mid-play.
     Bounded by DRAIN_TIMEOUT; returns at once when nothing is playing (idle)."""
+    playing = sum(1 for vc in client.voice_clients if vc.is_playing())
+    if playing:
+        print(f"graceful shutdown — waiting for {playing} song(s) to finish (up to {DRAIN_TIMEOUT}s)")
     for _ in range(DRAIN_TIMEOUT):
         if not any(vc.is_playing() for vc in client.voice_clients):
+            if playing:
+                print("graceful shutdown — song finished, closing")
             return
         await asyncio.sleep(1)
     print("drain timeout — closing with a track still playing")
