@@ -9,21 +9,37 @@ listener set.
 The code ships **no music** — you point it at your own library. Copyright posture of what you
 stream is yours to hold.
 
-## Status: Phase 4 — now-playing card with live ratings
+## How it works
 
-On startup the bot scans `MUSIC_DIR` into a SQLite library (tags via mutagen) and auto-joins its
-configured voice channel. It streams a shuffled walk of the library **only while a human is in the
-channel**. For each track it posts a **now-playing card** — album art, the track, five rating
-buttons (hate/dislike/shrug/like/love) and a **live colored sidebar** showing each present member's
-rating in its color — and sets its Discord presence to the track. Ratings live in the DB, seeded
-from Plex ★. Commands: `/join`, `/skip`, `/leave`.
+On startup the bot loads its SQLite library (or scans `MUSIC_DIR` into it on first run, tags via
+mutagen) and, for each configured server, joins the voice channel **only while a human is in it** —
+it follows the room, leaving when the channel empties. While it plays, it posts a **now-playing
+card** in the server's card channel: album art, the track, five rating buttons
+(hate/dislike/shrug/like/love), and a **live colored sidebar** showing each present member's rating
+in its color.
 
-Roadmap: (1) ✅ stream one file · (2) ✅ continuous shuffle · (3) ✅ persistence + ratings ·
-(4) ✅ now-playing card + rating buttons · (5) selection engine over VC members · (6) chat +
-requests · someday: package for open source.
+The next track is not a shuffle. A **selection engine** (`engine.py`) composes each block by
+scoring tracks on `SUM(rating)` over whoever is present right now — mixing loved tracks, net
+positives, unrated-by-present, and a random-from-unrated wildcard — with a play-timeout and an
+artist back-to-back guard. Requests jump the queue. Ratings are per-user-per-track on an asymmetric
+scale that punishes the veto: **hate −4 · dislike −1 · shrug 0 · like +1 · love +2.**
 
-Ratings are per-user-per-track on an asymmetric scale that punishes the veto: hate −4, dislike −1,
-shrug 0, like +1, love +2.
+## Commands
+
+- `/join` — start the radio in this server's voice channel (or just join the channel; it follows you in).
+- `/skip` — skip the current track.
+- `/request <track>` — queue a track to play next; autocompletes over the library.
+- `/add <file>` — add an audio file to the shared library. It's tagged, saved, and immediately
+  requestable. `MUSIC_DIR` stays read-only; uploads land in a separate writable ingest dir
+  (`ADDED_DIR`, defaulting inside `/data` so no extra mount is needed).
+- `/setup` — **(admin)** register this server's voice + card channel — see multi-tenant below.
+- `/leave` — stop this server's radio.
+
+## Status
+
+Streaming, the rating card, the selection engine, requests, listener uploads, multi-tenant (one
+process serves many servers), and Plex/shasradio rating import are all in and running privately.
+Someday: package for open source.
 
 ## Config
 
@@ -33,6 +49,8 @@ Copy `.env.sample` to `.env` and set:
 - `MUSIC_DIR` — path to your music library (scanned recursively for `.flac .mp3 .m4a .aac .ogg
   .opus .wav .wma`).
 - `DB_PATH` / `DATA_DIR` — where the SQLite DB lives (local default `./data`).
+- `ADDED_DIR` — **optional**, writable ingest dir for `/add` uploads; defaults to an `added/` subdir
+  next to the DB, so it works with no extra mount.
 - `GUILD_ID` / `VOICE_CHANNEL_ID` / `NOWPLAYING_CHANNEL_ID` — **optional**, seed-only (see below).
 
 Invite the bot with the `bot` + `applications.commands` scopes and the **View Channels, Send
