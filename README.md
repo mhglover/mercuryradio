@@ -24,6 +24,32 @@ positives, unrated-by-present, and a random-from-unrated wildcard — with a pla
 artist back-to-back guard. Requests jump the queue. Ratings are per-user-per-track on an asymmetric
 scale that punishes the veto: **hate −4 · dislike −1 · shrug 0 · like +1 · love +2.**
 
+## Where it comes from
+
+This is the third build of one idea, over twenty years.
+
+**shasradio** (~2000–2004) was a Perl streaming-radio site — an Icecast mount a handful of friends
+tuned into at once. A CGI page (`ratebox.pl`) gave each song five buttons and a live colored
+sidebar, and every half hour the station rebuilt its next block **from the ratings of whoever was in
+the room at that moment**: a request, a song nobody present had heard, a few the room rated highly.
+The scale already punished the veto — love +2, **hate −4**, one hate cancelling two loves — so a
+single person could keep the room off a song they couldn't stand.
+
+**mercury** (2024) rebuilt the engine in Python for Spotify. It kept the collective heart — the next
+queue is still `SUM(rating)` over everyone active, the same query shasradio ran in 2002 — but each
+listener heard it through their own Spotify player. What it dropped was the *room*: no shared audio,
+no chat, no live sidebar, no seeing what everyone else thought of the song playing right now.
+
+**mercuryradio** (2026) puts the room back, on Discord. A bot in a voice channel **is** the shared
+stream — the Icecast mount reborn — so everyone hears the same song at the same second. The voice
+channel's member list is the listener set; the now-playing card carries the five buttons and the
+live colored sidebar; the next block is scored over whoever's present. Two decades of ratings came
+along: the original shasradio ratings were restored, so a listener's twenty-year-old taste can greet
+them the first time they walk in.
+
+The invariant across all three: **selection is collective, computed from the room. Take the
+listeners away and the score doesn't exist.**
+
 ## Commands
 
 - `/join` — start the radio in this server's voice channel (or just join the channel; it follows you in).
