@@ -29,6 +29,11 @@ load_dotenv()
 
 TOKEN = os.environ["DISCORD_TOKEN"]
 MUSIC_DIR = os.environ["MUSIC_DIR"]
+# Writable ingest dir for /add uploads (the source library stays read-only). Defaults
+# into the already-writable /data volume, so shipping /add needs no extra mount; set
+# ADDED_DIR to a dedicated RW mount if you'd rather keep uploads out of the DB volume.
+ADDED_DIR = os.environ.get("ADDED_DIR") or os.path.join(os.path.dirname(os.environ.get("DB_PATH", "/data/db")), "added")
+ADD_MAX_BYTES = 100 * 1024 * 1024  # sanity guard; Discord's own upload cap is the real limit
 # Legacy single-guild env — only seeds the guilds table on first boot.
 _SEED_GUILD_ID = int(os.environ.get("GUILD_ID") or 0) or None
 _SEED_VOICE_ID = int(os.environ.get("VOICE_CHANNEL_ID") or 0) or None
@@ -327,10 +332,20 @@ client = MercuryClient(intents=intents)
 tree = app_commands.CommandTree(client)
 
 
+def _scan_library() -> int:
+    """Scan the read-only source library plus the writable /add ingest dir. Runs
+    in a thread executor. Added tracks are upserted live on /add, but re-walking
+    ADDED_DIR here re-catalogs them if the DB is ever rebuilt from empty."""
+    n = library.scan(MUSIC_DIR)
+    if os.path.isdir(ADDED_DIR):
+        n = library.scan(ADDED_DIR)
+    return n
+
+
 async def _rescan_bg() -> None:
     """Refresh the library off the loop, after playback has already started."""
     try:
-        n = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
+        n = await _loop.run_in_executor(None, _scan_library)
         print(f"background library rescan complete — {n} tracks")
     except Exception as e:
         print(f"background rescan failed: {e}")
@@ -403,7 +418,7 @@ async def on_ready() -> None:
             print(f"mercuryradio up as {client.user} — {db.music_count(conn)} tracks (rescanning in background)")
             _loop.create_task(_rescan_bg())
         else:
-            count = await _loop.run_in_executor(None, library.scan, MUSIC_DIR)
+            count = await _loop.run_in_executor(None, _scan_library)
             print(f"mercuryradio up as {client.user} — {count} tracks (first scan)")
     # (re)serve every enabled guild
     for row in db.list_guilds(conn):
@@ -477,15 +492,20 @@ async def skip(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("Nothing playing.", ephemeral=True)
 
 
+def _resolve_track(track: str):
+    """The track row for an autocomplete pick (a track id) or free text (first match)."""
+    if track.isdigit():
+        row = conn.execute("SELECT id, artist, title FROM tracks WHERE id = ?", (int(track),)).fetchone()
+        if row:
+            return row
+    matches = db.search_tracks(conn, track, 1)
+    return matches[0] if matches else None
+
+
 @tree.command(name="request", description="Request a track — it plays next.")
 @app_commands.describe(track="Start typing an artist or title, then pick from the list")
 async def request(interaction: discord.Interaction, track: str) -> None:
-    row = None
-    if track.isdigit():
-        row = conn.execute("SELECT id, artist, title FROM tracks WHERE id = ?", (int(track),)).fetchone()
-    if row is None:
-        matches = db.search_tracks(conn, track, 1)
-        row = matches[0] if matches else None
+    row = _resolve_track(track)
     if row is None:
         await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
         return
@@ -501,6 +521,75 @@ async def _request_autocomplete(interaction: discord.Interaction, current: str):
         return []
     rows = db.search_tracks(conn, current, 25)
     return [app_commands.Choice(name=f"{r['artist']} – {r['title']}"[:100], value=str(r["id"])) for r in rows]
+
+
+# Rating picker for /rate — same five values as the now-playing buttons.
+_RATING_CHOICES = [app_commands.Choice(name=label, value=value) for label, value, _sq, _st in RATINGS]
+
+
+@tree.command(name="rate", description="Set or change your rating for any track.")
+@app_commands.describe(track="Start typing an artist or title, then pick from the list", rating="Your rating")
+@app_commands.choices(rating=_RATING_CHOICES)
+async def rate(interaction: discord.Interaction, track: str, rating: app_commands.Choice[int]) -> None:
+    row = _resolve_track(track)
+    if row is None:
+        await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
+        return
+    db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
+    db.set_rating(conn, str(interaction.user.id), row["id"], rating.value)
+    if interaction.guild_id:
+        db.touch_presence(conn, interaction.user.id, interaction.guild_id)  # rating == present here
+    square = _SQUARE.get(rating.value, UNRATED)
+    await interaction.response.send_message(
+        f"{square} Rated **{row['artist']} – {row['title']}** {rating.name}.", ephemeral=True)
+    # If it's the track playing here right now, reflect the new rating on the card.
+    radio = _radio(interaction.guild_id) if interaction.guild_id else None
+    if radio and radio.current_row and radio.current_row["id"] == row["id"]:
+        await _refresh_sidebar(radio)
+
+
+# Same free-text -> track-id autocomplete as /request.
+rate.autocomplete("track")(_request_autocomplete)
+
+
+@tree.command(name="myratings", description="Show a summary of your ratings and your most recent ones.")
+async def myratings(interaction: discord.Interaction) -> None:
+    uid = str(interaction.user.id)
+    summary = db.rating_summary(conn, uid)
+    total = sum(summary.values())
+    if not total:
+        await interaction.response.send_message("You haven't rated anything yet.", ephemeral=True)
+        return
+    counts = "  ".join(f"{sq} {summary.get(value, 0)}" for _label, value, sq, _st in RATINGS)
+    lines = [f"{_SQUARE.get(r['value'], UNRATED)} {r['artist']} – {r['title']}"
+             for r in db.recent_ratings(conn, uid, 10)]
+    body = f"**{total}** ratings   {counts}\n\n**Recent:**\n" + "\n".join(lines)
+    await interaction.response.send_message(body, ephemeral=True)
+
+
+@tree.command(name="add", description="Add a song to the shared library from a file.")
+@app_commands.describe(file="An audio file — it's added to the library and becomes requestable.")
+async def add(interaction: discord.Interaction, file: discord.Attachment) -> None:
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in library.AUDIO_EXTS:
+        kinds = ", ".join(sorted(e.lstrip(".") for e in library.AUDIO_EXTS))
+        await interaction.response.send_message(f"That's not an audio file. Accepted: {kinds}.", ephemeral=True)
+        return
+    if file.size > ADD_MAX_BYTES:
+        await interaction.response.send_message(f"That file is too big ({file.size // (1024*1024)} MB).", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    os.makedirs(ADDED_DIR, exist_ok=True)
+    # basename only — never let an attachment name escape the ingest dir
+    dest = os.path.join(ADDED_DIR, os.path.basename(file.filename))
+    try:
+        await file.save(dest)
+    except (discord.HTTPException, OSError) as e:
+        await interaction.followup.send(f"Couldn't save that file: {e}", ephemeral=True)
+        return
+    artist, title, album, duration = library._read_tags(dest)
+    db.upsert_track(conn, artist, title, album, dest, duration)  # loop-thread conn; first-path-wins dedupes
+    await interaction.followup.send(f"Added **{artist} – {title}** to the library — request it with /request.")
 
 
 @tree.command(name="leave", description="Stop this server's radio and leave.")

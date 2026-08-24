@@ -306,3 +306,22 @@ def set_rating(conn, user_id: str, track_id: int, value: int) -> None:
         "ON CONFLICT(user_id, track_id) DO UPDATE SET value = excluded.value, updated = excluded.updated",
         (str(user_id), track_id, value, _now()),
     )
+    conn.commit()
+
+
+def rating_summary(conn, user_id: str) -> dict[int, int]:
+    """{rating value: count} over all of one user's ratings. Feeds /myratings."""
+    rows = conn.execute(
+        "SELECT value, COUNT(*) AS n FROM ratings WHERE user_id = ? GROUP BY value",
+        (str(user_id),),
+    ).fetchall()
+    return {r["value"]: r["n"] for r in rows}
+
+
+def recent_ratings(conn, user_id: str, limit: int = 10) -> list[sqlite3.Row]:
+    """A user's most-recently-changed ratings (artist, title, value), newest first."""
+    return conn.execute(
+        "SELECT t.artist, t.title, r.value FROM ratings r JOIN tracks t ON t.id = r.track_id "
+        "WHERE r.user_id = ? ORDER BY r.updated DESC LIMIT ?",
+        (str(user_id), limit),
+    ).fetchall()

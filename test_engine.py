@@ -136,8 +136,23 @@ def test_guilds_table_crud():
     assert db.list_guilds(conn) == [] and db.get_guild(conn, "123") is None
 
 
+def test_rating_summary_and_recent():
+    conn, t, _ab = _seed()
+    # u1 rates three tracks; a2 gets re-rated (upsert, not a second row).
+    db.set_rating(conn, "u1", t[("A", "a1")], db.LOVE)
+    db.set_rating(conn, "u1", t[("B", "b1")], db.LOVE)
+    db.set_rating(conn, "u1", t[("A", "a2")], db.HATE)
+    db.set_rating(conn, "u1", t[("A", "a2")], db.LIKE)  # changed hate -> like
+    assert db.rating_summary(conn, "u1") == {db.LOVE: 2, db.LIKE: 1}, db.rating_summary(conn, "u1")
+    assert db.rating_summary(conn, "nobody") == {}
+    recent = db.recent_ratings(conn, "u1", 10)
+    assert len(recent) == 3  # upsert didn't add a row
+    assert (recent[0]["artist"], recent[0]["title"]) == ("A", "a2")  # newest change first
+
+
 if __name__ == "__main__":
     for fn in (
+        test_rating_summary_and_recent,
         test_top_scores_over_present_members,
         test_never_picks_an_audiobook,
         test_timeout_excludes_recently_played,
