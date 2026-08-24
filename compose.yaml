@@ -1,5 +1,5 @@
-# Runs alongside Plex/Tautulli/Transmission — no published ports, just Discord
-# egress and a read-only bind mount of your music library.
+# No published ports — just Discord egress and a read-only bind mount of your
+# music library.
 #
 # Set DISCORD_TOKEN, GUILD_ID and MUSIC_DIR in a .env file next to this one (or
 # in Portainer's stack environment). MUSIC_DIR is the host path to your library.

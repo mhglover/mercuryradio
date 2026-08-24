@@ -118,7 +118,7 @@ uv run bot.py
 
 With `VOICE_CHANNEL_ID` set the bot auto-joins and starts; otherwise `/join` from a voice channel.
 
-## Run in Docker (alongside Plex/Tautulli/Transmission)
+## Run in Docker
 
 No published ports — it only needs Discord egress, a read-only mount of your library, and a
 writable `/data` dir for the SQLite DB. Set the values in `.env`, then:
