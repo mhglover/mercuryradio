@@ -443,6 +443,39 @@ async def on_voice_state_update(member, before, after) -> None:
     await _refresh_sidebar(radio)
 
 
+@tree.command(name="help", description="What Mercury Radio is and how to listen and rate.")
+async def help_cmd(interaction: discord.Interaction) -> None:
+    scale = " · ".join(f"{sq} {label}" for label, _v, sq, _s in RATINGS)
+    embed = discord.Embed(
+        title="🎵 Mercury Radio",
+        description="Everyone in the voice channel hears the **same stream at the same time**. "
+                    "The next song isn't random — it's picked from the ratings of whoever's "
+                    "listening right now. Rate along and the station bends toward the room's taste.",
+    )
+    embed.add_field(
+        name="Listen",
+        value="Join the station **voice channel**. The bot hops in whenever someone's there and "
+              "leaves when it's empty — so if you're the first in, give it a moment to wake up.",
+        inline=False,
+    )
+    embed.add_field(
+        name="Rate",
+        value=f"Click a button under the **now-playing card**:\n{scale}\n"
+              "Your pick shows in your color on the card's sidebar and feeds what plays next. "
+              "The scale punishes the veto — a Hate counts far more than a Love. "
+              "You can also `/rate` any track by name, even off-air.",
+        inline=False,
+    )
+    embed.add_field(
+        name="Commands",
+        value="`/request` a track to play next · `/add` a file to the library · `/skip` the current "
+              "song · `/myratings` your history · `/join` / `/leave` the radio · "
+              "`/setup` (admin) point it at a channel.",
+        inline=False,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 @tree.command(name="setup", description="Register this server's radio (admin).")
 @app_commands.describe(voice="Voice channel to stream in", card="Text channel for the now-playing card")
 async def setup(interaction: discord.Interaction, voice: discord.VoiceChannel,
