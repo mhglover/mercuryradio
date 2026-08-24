@@ -224,10 +224,10 @@ class _RatingButton(discord.ui.Button):
         if radio is None or radio.current_row is None:
             await interaction.response.send_message("Nothing playing.", ephemeral=True)
             return
+        await interaction.response.defer()  # ack first — Discord gives 3s; do the DB work after
         db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
         db.set_rating(conn, str(interaction.user.id), radio.current_row["id"], self.value)
         db.touch_presence(conn, interaction.user.id, interaction.guild_id)  # rating == present here
-        await interaction.response.defer()  # ack, no new message
         await _refresh_sidebar(radio)
 
 
