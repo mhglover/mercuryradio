@@ -34,6 +34,7 @@ MUSIC_DIR = os.environ["MUSIC_DIR"]
 # ADDED_DIR to a dedicated RW mount if you'd rather keep uploads out of the DB volume.
 ADDED_DIR = os.environ.get("ADDED_DIR") or os.path.join(os.path.dirname(os.environ.get("DB_PATH", "/data/db")), "added")
 ADD_MAX_BYTES = 100 * 1024 * 1024  # sanity guard; Discord's own upload cap is the real limit
+MAX_ADD_MINUTES = int(os.environ.get("MAX_ADD_MINUTES") or 20)  # cap on /youtube pulls
 # Legacy single-guild env — only seeds the guilds table on first boot.
 _SEED_GUILD_ID = int(os.environ.get("GUILD_ID") or 0) or None
 _SEED_VOICE_ID = int(os.environ.get("VOICE_CHANNEL_ID") or 0) or None
@@ -515,6 +516,48 @@ async def on_voice_state_update(member, before, after) -> None:
     await _refresh_sidebar(radio)
 
 
+# ── permissions + shared add-to-library ─────────────────────────────────────
+
+def _may(interaction: discord.Interaction, action: str) -> bool:
+    """Permission gate for add/mutate commands. Open today — a private friends
+    server, so everyone may do everything. This is the single place a role model
+    plugs in when the bot lands on a bigger server (see the mercuryradio
+    permissions someday project); the handlers route through it so that's one
+    function then, not a rewrite of each command."""
+    return True
+
+
+async def _gate(interaction: discord.Interaction, action: str) -> bool:
+    if _may(interaction, action):
+        return True
+    await interaction.response.send_message("You don't have permission to do that here.", ephemeral=True)
+    return False
+
+
+def _add_to_library(path: str) -> tuple[str, str, bool]:
+    """Tag, dedup, and upsert one already-saved audio file into the shared library.
+    Shared by /add and /youtube so both add-paths tag and dedup identically. Returns
+    (artist, title, created); created is False when the track's tags already matched a
+    library row. A redundant fresh copy is removed so ADDED_DIR doesn't collect dupes
+    (but a path healed onto a moved track is kept — that's the canonical file now)."""
+    artist, title, album, duration = library._read_tags(path)
+    key = db.norm_key(artist, title, album)
+    created = db.track_id_for_key(conn, key) is None
+    db.upsert_track(conn, artist, title, album, path, duration)  # loop-thread conn
+    if not created:
+        stored = conn.execute("SELECT path FROM tracks WHERE norm_key = ?", (key,)).fetchone()["path"]
+        if stored != path and os.path.exists(path):
+            try:
+                os.remove(path)  # a duplicate of a track we already have
+            except OSError:
+                pass
+    return artist, title, created
+
+
+def _tail(text: str, n: int = 300) -> str:
+    return (((text or "").strip().splitlines() or ["unknown error"])[-1])[:n]
+
+
 @tree.command(name="help", description="What Mercury Radio is and how to listen and rate.")
 async def help_cmd(interaction: discord.Interaction) -> None:
     scale = " · ".join(f"{sq} {label}" for label, _v, sq, _s in RATINGS)
@@ -589,6 +632,8 @@ async def join(interaction: discord.Interaction) -> None:
 
 @tree.command(name="skip", description="Skip to the next track.")
 async def skip(interaction: discord.Interaction) -> None:
+    if not await _gate(interaction, "skip"):
+        return
     vc = interaction.guild.voice_client if interaction.guild else None
     if vc and vc.is_playing():
         vc.stop()
@@ -675,6 +720,8 @@ async def myratings(interaction: discord.Interaction) -> None:
 @tree.command(name="add", description="Add a song to the shared library from a file.")
 @app_commands.describe(file="An audio file — it's added to the library and becomes requestable.")
 async def add(interaction: discord.Interaction, file: discord.Attachment) -> None:
+    if not await _gate(interaction, "add"):
+        return
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in library.AUDIO_EXTS:
         kinds = ", ".join(sorted(e.lstrip(".") for e in library.AUDIO_EXTS))
@@ -683,7 +730,9 @@ async def add(interaction: discord.Interaction, file: discord.Attachment) -> Non
     if file.size > ADD_MAX_BYTES:
         await interaction.response.send_message(f"That file is too big ({file.size // (1024*1024)} MB).", ephemeral=True)
         return
-    await interaction.response.defer(thinking=True)
+    # Split feedback: the interim/errors are ephemeral (requester-only), the "Added"
+    # is a public channel message so the room sees new music land.
+    await interaction.response.defer(thinking=True, ephemeral=True)
     os.makedirs(ADDED_DIR, exist_ok=True)
     # basename only — never let an attachment name escape the ingest dir
     dest = os.path.join(ADDED_DIR, os.path.basename(file.filename))
@@ -692,41 +741,87 @@ async def add(interaction: discord.Interaction, file: discord.Attachment) -> Non
     except (discord.HTTPException, OSError) as e:
         await interaction.followup.send(f"Couldn't save that file: {e}", ephemeral=True)
         return
-    artist, title, album, duration = library._read_tags(dest)
-    db.upsert_track(conn, artist, title, album, dest, duration)  # loop-thread conn; first-path-wins dedupes
-    await interaction.followup.send(f"Added **{artist} – {title}** to the library — request it with /request.")
+    artist, title, created = _add_to_library(dest)
+    if not created:
+        await interaction.followup.send(f"**{artist} – {title}** is already in the library — /request it.", ephemeral=True)
+        return
+    await interaction.channel.send(f"🎵 Added **{artist} – {title}** to the library — /request it.")
+    await interaction.followup.send(f"Added **{artist} – {title}** ✓", ephemeral=True)
 
 
-@tree.command(name="youtube", description="Pull audio from a YouTube link and add it to the library.")
-@app_commands.describe(url="A YouTube (or other yt-dlp-supported) link to a song.")
-async def youtube(interaction: discord.Interaction, url: str) -> None:
+async def _yt(*args):
+    """Run yt-dlp as an async child process so a download never blocks the audio
+    loop. Returns (returncode, stdout, stderr) as decoded text."""
+    p = await asyncio.create_subprocess_exec(
+        "yt-dlp", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    out, err = await p.communicate()
+    return p.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+
+
+@tree.command(name="youtube", description="Pull audio from a link and add it to the library.")
+@app_commands.describe(
+    url="A YouTube (or other yt-dlp-supported) link to a song.",
+    artist="Override the artist tag (optional).",
+    title="Override the title tag (optional).",
+)
+async def youtube(interaction: discord.Interaction, url: str,
+                  artist: str | None = None, title: str | None = None) -> None:
+    if not await _gate(interaction, "youtube"):
+        return
     if not url.lower().startswith(("http://", "https://")):
         await interaction.response.send_message("That doesn't look like a link.", ephemeral=True)
         return
-    await interaction.response.defer(thinking=True)
+    # Split feedback: the interim + every error is ephemeral (keeps #music clean),
+    # the final "Added" is a public channel message. So defer ephemeral.
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    max_secs = MAX_ADD_MINUTES * 60
+    # One fast metadata pre-fetch does triple duty: the interim title, the clean
+    # tags for the ladder, and an early duration reject (fail a too-long video in
+    # ~2s instead of after a wasted download).
+    rc, out, err = await _yt(
+        "--skip-download", "--no-playlist",
+        "--print", "%(artist|NA)s", "--print", "%(track|NA)s",
+        "--print", "%(title)s", "--print", "%(duration|0)s", url)
+    if rc != 0:
+        await interaction.followup.send(f"Couldn't read that link: {_tail(err)}", ephemeral=True)
+        return
+    lines = (out.strip().splitlines() + ["NA", "NA", "that video", "0"])[:4]
+    meta_artist, meta_track, vtitle, dur_s = lines
+    try:
+        dur = float(dur_s)
+    except ValueError:
+        dur = 0.0
+    if dur and dur > max_secs:
+        await interaction.followup.send(
+            f"That's {int(dur // 60)} min — over the {MAX_ADD_MINUTES}-minute limit.", ephemeral=True)
+        return
+    r_artist, r_title = library.resolve_yt_tags(meta_artist, meta_track, vtitle, artist, title)
+    interim = await interaction.followup.send(
+        f"🔎 Found **{r_artist} – {r_title}** — pulling the audio…", ephemeral=True, wait=True)
+
     os.makedirs(ADDED_DIR, exist_ok=True)
-    # yt-dlp runs as a child process (async) so the download never blocks the audio loop.
-    # --match-filter caps length; --print returns the final mp3 path; empty = filtered out.
-    proc = await asyncio.create_subprocess_exec(
-        "yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
-        "--no-playlist", "--match-filter", "duration < 1200", "--embed-metadata",
+    rc, out, err = await _yt(
+        "-x", "--audio-format", "mp3", "--audio-quality", "0",
+        "--no-playlist", "--match-filter", f"duration < {max_secs}",
         "--restrict-filenames", "--no-progress",
         "-o", os.path.join(ADDED_DIR, "%(title)s-%(id)s.%(ext)s"),
-        "--print", "after_move:filepath", url,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    out, err = await proc.communicate()
-    if proc.returncode != 0:
-        tail = (err.decode(errors="replace").strip().splitlines() or ["unknown error"])[-1]
-        await interaction.followup.send(f"Couldn't fetch that: {tail[:300]}", ephemeral=True)
+        "--print", "after_move:filepath", url)
+    if rc != 0:
+        await interim.edit(content=f"Couldn't fetch the audio: {_tail(err)}")
         return
-    path = (out.decode(errors="replace").strip().splitlines() or [""])[-1]
+    path = (out.strip().splitlines() or [""])[-1]
     if not path or not os.path.exists(path):
-        await interaction.followup.send("Nothing was downloaded — the video may be over 20 minutes.", ephemeral=True)
+        await interim.edit(content=f"Nothing downloaded — the video may be over {MAX_ADD_MINUTES} minutes.")
         return
-    artist, title, album, duration = library._read_tags(path)
-    db.upsert_track(conn, artist, title, album, path, duration)
-    await interaction.followup.send(f"Added **{artist} – {title}** from YouTube — request it with /request.")
+    # Set our resolved tags explicitly — they drive norm_key/dedup, so we don't trust
+    # whatever the source embedded — then dedup + upsert through the shared path.
+    library.write_tags(path, r_artist, r_title)
+    lib_artist, lib_title, created = _add_to_library(path)
+    if not created:
+        await interim.edit(content=f"**{lib_artist} – {lib_title}** is already in the library — /request it.")
+        return
+    await interim.edit(content=f"Added **{lib_artist} – {lib_title}** ✓")
+    await interaction.channel.send(f"🎵 Added **{lib_artist} – {lib_title}** from YouTube — /request it.")
 
 
 @tree.command(name="recent", description="Show recently played tracks and rate any you missed.")
@@ -742,6 +837,8 @@ async def recent(interaction: discord.Interaction) -> None:
 
 @tree.command(name="leave", description="Stop this server's radio and leave.")
 async def leave(interaction: discord.Interaction) -> None:
+    if not await _gate(interaction, "leave"):
+        return
     radio = _radio(interaction.guild_id) if interaction.guild_id else None
     vc = interaction.guild.voice_client if interaction.guild else None
     if vc:

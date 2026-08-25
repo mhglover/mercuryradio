@@ -58,8 +58,12 @@ listeners away and the score doesn't exist.**
 - `/add <file>` — add an audio file to the shared library. It's tagged, saved, and immediately
   requestable. `MUSIC_DIR` stays read-only; uploads land in a separate writable ingest dir
   (`ADDED_DIR`, defaulting inside `/data` so no extra mount is needed).
-- `/youtube <url>` — pull audio from a YouTube (or other yt-dlp-supported) link into the library.
-  Downloaded off the audio loop, capped at 20 minutes, lands in `ADDED_DIR` like `/add`.
+- `/youtube <url> [artist:] [title:]` — pull audio from a YouTube (or other yt-dlp-supported) link
+  into the library. A fast metadata pre-fetch names the track and rejects an over-long video before
+  downloading; tags come from the source's own artist/track, else the video title split on `" - "`,
+  and the optional `artist:`/`title:` params override either. Downloaded off the audio loop, capped
+  at `MAX_ADD_MINUTES` (default 20), lands in `ADDED_DIR` like `/add`. The "Added" lands publicly in
+  the channel; the interim and any errors are shown only to you.
 - `/recent` — show the last few played tracks and rate one you didn't click while it played.
 - `/setup` — **(admin)** register this server's voice + card channel — see multi-tenant below.
 - `/leave` — stop this server's radio.
@@ -78,8 +82,10 @@ Copy `.env.sample` to `.env` and set:
 - `MUSIC_DIR` — path to your music library (scanned recursively for `.flac .mp3 .m4a .aac .ogg
   .opus .wav .wma`).
 - `DB_PATH` / `DATA_DIR` — where the SQLite DB lives (local default `./data`).
-- `ADDED_DIR` — **optional**, writable ingest dir for `/add` uploads; defaults to an `added/` subdir
-  next to the DB, so it works with no extra mount.
+- `ADDED_DIR` — **optional**, writable ingest dir for `/add` and `/youtube` files; defaults to an
+  `added/` subdir next to the DB, so it works with no extra mount.
+- `MAX_ADD_MINUTES` — **optional**, cap on a `/youtube` pull (default 20). Longer videos are rejected
+  at the pre-fetch, before any download.
 - `GUILD_ID` / `VOICE_CHANNEL_ID` / `NOWPLAYING_CHANNEL_ID` — **optional**, seed-only (see below).
 
 Invite the bot with the `bot` + `applications.commands` scopes and the **View Channels, Send
