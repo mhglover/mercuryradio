@@ -58,6 +58,9 @@ listeners away and the score doesn't exist.**
 - `/add <file>` — add an audio file to the shared library. It's tagged, saved, and immediately
   requestable. `MUSIC_DIR` stays read-only; uploads land in a separate writable ingest dir
   (`ADDED_DIR`, defaulting inside `/data` so no extra mount is needed).
+- `/youtube <url>` — pull audio from a YouTube (or other yt-dlp-supported) link into the library.
+  Downloaded off the audio loop, capped at 20 minutes, lands in `ADDED_DIR` like `/add`.
+- `/recent` — show the last few played tracks and rate one you didn't click while it played.
 - `/setup` — **(admin)** register this server's voice + card channel — see multi-tenant below.
 - `/leave` — stop this server's radio.
 
