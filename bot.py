@@ -697,6 +697,38 @@ async def add(interaction: discord.Interaction, file: discord.Attachment) -> Non
     await interaction.followup.send(f"Added **{artist} – {title}** to the library — request it with /request.")
 
 
+@tree.command(name="youtube", description="Pull audio from a YouTube link and add it to the library.")
+@app_commands.describe(url="A YouTube (or other yt-dlp-supported) link to a song.")
+async def youtube(interaction: discord.Interaction, url: str) -> None:
+    if not url.lower().startswith(("http://", "https://")):
+        await interaction.response.send_message("That doesn't look like a link.", ephemeral=True)
+        return
+    await interaction.response.defer(thinking=True)
+    os.makedirs(ADDED_DIR, exist_ok=True)
+    # yt-dlp runs as a child process (async) so the download never blocks the audio loop.
+    # --match-filter caps length; --print returns the final mp3 path; empty = filtered out.
+    proc = await asyncio.create_subprocess_exec(
+        "yt-dlp", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+        "--no-playlist", "--match-filter", "duration < 1200", "--embed-metadata",
+        "--restrict-filenames", "--no-progress",
+        "-o", os.path.join(ADDED_DIR, "%(title)s-%(id)s.%(ext)s"),
+        "--print", "after_move:filepath", url,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await proc.communicate()
+    if proc.returncode != 0:
+        tail = (err.decode(errors="replace").strip().splitlines() or ["unknown error"])[-1]
+        await interaction.followup.send(f"Couldn't fetch that: {tail[:300]}", ephemeral=True)
+        return
+    path = (out.decode(errors="replace").strip().splitlines() or [""])[-1]
+    if not path or not os.path.exists(path):
+        await interaction.followup.send("Nothing was downloaded — the video may be over 20 minutes.", ephemeral=True)
+        return
+    artist, title, album, duration = library._read_tags(path)
+    db.upsert_track(conn, artist, title, album, path, duration)
+    await interaction.followup.send(f"Added **{artist} – {title}** from YouTube — request it with /request.")
+
+
 @tree.command(name="recent", description="Show recently played tracks and rate any you missed.")
 async def recent(interaction: discord.Interaction) -> None:
     plays = db.recent_plays(conn, 10)
