@@ -248,6 +248,7 @@ class RecentView(discord.ui.View):
 
     def __init__(self, plays):
         super().__init__(timeout=300)
+        self.plays = plays  # ordered rows, kept so the list can be rebuilt after a rating
         self.labels = {r["id"]: f"{r['artist']} – {r['title']}" for r in plays}
         self.selected = plays[0]["id"]  # default to the newest
         options = [
@@ -258,6 +259,15 @@ class RecentView(discord.ui.View):
         self.add_item(_RecentSelect(options))
         for label, value, square, style in RATINGS:
             self.add_item(_RecentRatingButton(label, value, square, style))
+
+    def body_for(self, uid: str) -> str:
+        """The numbered list with THIS user's rating square (⬛ unrated) per track."""
+        lines = []
+        for i, r in enumerate(self.plays):
+            val = db.get_rating(conn, uid, r["id"])
+            square = _SQUARE.get(val, UNRATED) if val is not None else UNRATED
+            lines.append(f"{i + 1}. {square} {r['artist']} – {r['title']}")
+        return "**Recently played** — the square is your rating; pick one below to set or change it:\n" + "\n".join(lines)
 
 
 class _RecentSelect(discord.ui.Select):
@@ -276,13 +286,13 @@ class _RecentRatingButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         track_id = self.view.selected
-        await interaction.response.defer(ephemeral=True)
+        uid = str(interaction.user.id)
         db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
-        db.set_rating(conn, str(interaction.user.id), track_id, self.value)
+        db.set_rating(conn, uid, track_id, self.value)
         if interaction.guild_id:
             db.touch_presence(conn, interaction.user.id, interaction.guild_id)
-        await interaction.followup.send(
-            f"Rated **{self.view.labels.get(track_id, 'that track')}** — {self.label}.", ephemeral=True)
+        # Refresh the list in place so the just-set square shows immediately.
+        await interaction.response.edit_message(content=self.view.body_for(uid), view=self.view)
 
 
 async def _refresh_sidebar(radio: GuildRadio) -> None:
@@ -830,14 +840,8 @@ async def recent(interaction: discord.Interaction) -> None:
     if not plays:
         await interaction.response.send_message("Nothing has played yet.", ephemeral=True)
         return
-    uid = str(interaction.user.id)
-    lines = []
-    for i, r in enumerate(plays):
-        val = db.get_rating(conn, uid, r["id"])  # your rating for this track, ⬛ if unrated
-        square = _SQUARE.get(val, UNRATED) if val is not None else UNRATED
-        lines.append(f"{i + 1}. {square} {r['artist']} – {r['title']}")
-    body = "**Recently played** — the square is your rating; pick one below to set or change it:\n" + "\n".join(lines)
-    await interaction.response.send_message(body, view=RecentView(plays), ephemeral=True)
+    view = RecentView(plays)
+    await interaction.response.send_message(view.body_for(str(interaction.user.id)), view=view, ephemeral=True)
 
 
 @tree.command(name="leave", description="Stop this server's radio and leave.")
