@@ -39,7 +39,12 @@ _SEED_GUILD_ID = int(os.environ.get("GUILD_ID") or 0) or None
 _SEED_VOICE_ID = int(os.environ.get("VOICE_CHANNEL_ID") or 0) or None
 _SEED_NP_ID = int(os.environ.get("NOWPLAYING_CHANNEL_ID") or 0) or None
 
-FFMPEG_OPTS = {"options": "-vn"}
+# -err_detect ignore_err / +discardcorrupt: drop bad MP3 frames cleanly instead of
+# glitching on them (some rips have corrupt frames). Opus is encoded by FFmpeg (in C)
+# rather than discord.py's Python encoder — far lighter on the send thread, which
+# smooths the frame pacing (Python-side encode lag is what makes the beat "speed up").
+FFMPEG_OPTS = {"before_options": "-err_detect ignore_err -fflags +discardcorrupt", "options": "-vn"}
+STREAM_BITRATE = 128  # kbps Opus; avoids FFmpegOpusAudio's blocking probe
 
 # A rating within this window counts a user as present (for scoring + the sidebar)
 # even without joining voice — for listeners sharing one speaker/connection.
@@ -159,9 +164,9 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
     radio.current_track = f"{row['artist']} – {row['title']}"
     db.record_play(conn, row["id"], reason=picker)
     opts = dict(FFMPEG_OPTS)
-    if seek > 0:
-        opts["before_options"] = f"-ss {seek}"  # input seek: start mid-song
-    source = discord.FFmpegPCMAudio(row["path"], **opts)
+    if seek > 0:  # input seek goes first, keep the error-tolerance flags after it
+        opts["before_options"] = f"-ss {seek} {opts['before_options']}"
+    source = discord.FFmpegOpusAudio(row["path"], bitrate=STREAM_BITRATE, **opts)
     vc.play(source, after=lambda err: _after(radio, vc, err, row["path"]))
     await _post_nowplaying(radio, vc.channel, row)
 
