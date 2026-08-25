@@ -830,8 +830,13 @@ async def recent(interaction: discord.Interaction) -> None:
     if not plays:
         await interaction.response.send_message("Nothing has played yet.", ephemeral=True)
         return
-    lines = [f"{i + 1}. {r['artist']} – {r['title']}" for i, r in enumerate(plays)]
-    body = "**Recently played** — pick one below to rate:\n" + "\n".join(lines)
+    uid = str(interaction.user.id)
+    lines = []
+    for i, r in enumerate(plays):
+        val = db.get_rating(conn, uid, r["id"])  # your rating for this track, ⬛ if unrated
+        square = _SQUARE.get(val, UNRATED) if val is not None else UNRATED
+        lines.append(f"{i + 1}. {square} {r['artist']} – {r['title']}")
+    body = "**Recently played** — the square is your rating; pick one below to set or change it:\n" + "\n".join(lines)
     await interaction.response.send_message(body, view=RecentView(plays), ephemeral=True)
 
 
