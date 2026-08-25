@@ -235,6 +235,50 @@ class _RatingButton(discord.ui.Button):
         await _refresh_sidebar(radio)
 
 
+class RecentView(discord.ui.View):
+    """Ephemeral, per-invocation: a dropdown of recently-played tracks plus the five
+    rating buttons, so a listener can rate a song they didn't click while it played.
+    Not persistent — it belongs to the one /recent response, so timeout is fine."""
+
+    def __init__(self, plays):
+        super().__init__(timeout=300)
+        self.labels = {r["id"]: f"{r['artist']} – {r['title']}" for r in plays}
+        self.selected = plays[0]["id"]  # default to the newest
+        options = [
+            discord.SelectOption(label=self.labels[r["id"]][:100], value=str(r["id"]),
+                                 default=(r["id"] == self.selected))
+            for r in plays
+        ]
+        self.add_item(_RecentSelect(options))
+        for label, value, square, style in RATINGS:
+            self.add_item(_RecentRatingButton(label, value, square, style))
+
+
+class _RecentSelect(discord.ui.Select):
+    def __init__(self, options):
+        super().__init__(placeholder="Pick a recent track to rate", options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.view.selected = int(self.values[0])
+        await interaction.response.defer()  # selection stored; buttons act on it
+
+
+class _RecentRatingButton(discord.ui.Button):
+    def __init__(self, label, value, square, style):
+        super().__init__(label=label, emoji=square, style=style, row=1)
+        self.value = value
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        track_id = self.view.selected
+        await interaction.response.defer(ephemeral=True)
+        db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
+        db.set_rating(conn, str(interaction.user.id), track_id, self.value)
+        if interaction.guild_id:
+            db.touch_presence(conn, interaction.user.id, interaction.guild_id)
+        await interaction.followup.send(
+            f"Rated **{self.view.labels.get(track_id, 'that track')}** — {self.label}.", ephemeral=True)
+
+
 async def _refresh_sidebar(radio: GuildRadio) -> None:
     """Rebuild the sidebar on this guild's card. Reads the VOICE channel for
     presence, not the card's text channel."""
@@ -646,6 +690,17 @@ async def add(interaction: discord.Interaction, file: discord.Attachment) -> Non
     artist, title, album, duration = library._read_tags(dest)
     db.upsert_track(conn, artist, title, album, dest, duration)  # loop-thread conn; first-path-wins dedupes
     await interaction.followup.send(f"Added **{artist} – {title}** to the library — request it with /request.")
+
+
+@tree.command(name="recent", description="Show recently played tracks and rate any you missed.")
+async def recent(interaction: discord.Interaction) -> None:
+    plays = db.recent_plays(conn, 10)
+    if not plays:
+        await interaction.response.send_message("Nothing has played yet.", ephemeral=True)
+        return
+    lines = [f"{i + 1}. {r['artist']} – {r['title']}" for i, r in enumerate(plays)]
+    body = "**Recently played** — pick one below to rate:\n" + "\n".join(lines)
+    await interaction.response.send_message(body, view=RecentView(plays), ephemeral=True)
 
 
 @tree.command(name="leave", description="Stop this server's radio and leave.")

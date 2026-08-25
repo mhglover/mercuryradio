@@ -119,10 +119,16 @@ def _migrate(conn) -> None:
 
 
 def upsert_track(conn, artist, title, album, path, duration=None) -> int:
-    """Insert a track (or return the existing one for these tags). First path wins."""
+    """Insert a track (or return the existing one for these tags). First path wins —
+    EXCEPT a stored path that no longer exists on disk is healed to the path we were
+    handed (which does exist, since a scan is looking right at it). This fixes the
+    library-reorg drift where files moved and the DB kept the dead scene-folder paths.
+    The row id is preserved, so ratings and play_history stay intact."""
     key = norm_key(artist, title, album)
-    row = conn.execute("SELECT id FROM tracks WHERE norm_key = ?", (key,)).fetchone()
+    row = conn.execute("SELECT id, path FROM tracks WHERE norm_key = ?", (key,)).fetchone()
     if row:
+        if path and path != row["path"] and not os.path.exists(row["path"]):
+            conn.execute("UPDATE tracks SET path = ? WHERE id = ?", (path, row["id"]))
         return row["id"]
     cur = conn.execute(
         "INSERT INTO tracks (artist, title, album, norm_key, path, duration, added) "
@@ -324,4 +330,15 @@ def recent_ratings(conn, user_id: str, limit: int = 10) -> list[sqlite3.Row]:
         "SELECT t.artist, t.title, r.value FROM ratings r JOIN tracks t ON t.id = r.track_id "
         "WHERE r.user_id = ? ORDER BY r.updated DESC LIMIT ?",
         (str(user_id), limit),
+    ).fetchall()
+
+
+def recent_plays(conn, limit: int = 10) -> list[sqlite3.Row]:
+    """The most-recently-played DISTINCT tracks (id, artist, title), newest first.
+    Feeds /recent so a listener can rate a track they didn't click while it played."""
+    return conn.execute(
+        "SELECT t.id, t.artist, t.title, MAX(p.played_at) AS last_played "
+        "FROM play_history p JOIN tracks t ON t.id = p.track_id "
+        "GROUP BY t.id ORDER BY last_played DESC LIMIT ?",
+        (limit,),
     ).fetchall()
