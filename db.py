@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS guilds (
     voice_channel_id      TEXT,
     nowplaying_channel_id TEXT,
     music_dir             TEXT,
+    add_role_id           TEXT,   -- role allowed to /add + /youtube; NULL = open to all
     enabled               INTEGER NOT NULL DEFAULT 1,
     added                 TEXT NOT NULL
 );
@@ -115,6 +116,11 @@ def _migrate(conn) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(requests)")}
     if "guild_id" not in cols:
         conn.execute("ALTER TABLE requests ADD COLUMN guild_id TEXT")
+        conn.commit()
+    # add_role_id gates /add + /youtube per guild (NULL = open); added after guilds shipped.
+    gcols = {r["name"] for r in conn.execute("PRAGMA table_info(guilds)")}
+    if "add_role_id" not in gcols:
+        conn.execute("ALTER TABLE guilds ADD COLUMN add_role_id TEXT")
         conn.commit()
 
 
@@ -259,6 +265,21 @@ def upsert_guild(conn, guild_id, voice_channel_id, nowplaying_channel_id=None, m
 
 def disable_guild(conn, guild_id) -> None:
     conn.execute("UPDATE guilds SET enabled = 0 WHERE guild_id = ?", (str(guild_id),))
+    conn.commit()
+
+
+def get_add_role(conn, guild_id) -> str | None:
+    """The role id allowed to /add + /youtube in this guild, or None (open to all)."""
+    row = conn.execute("SELECT add_role_id FROM guilds WHERE guild_id = ?", (str(guild_id),)).fetchone()
+    return row["add_role_id"] if row else None
+
+
+def set_add_role(conn, guild_id, role_id) -> None:
+    """Restrict /add + /youtube to a role (role_id), or None to open it back up."""
+    conn.execute(
+        "UPDATE guilds SET add_role_id = ? WHERE guild_id = ?",
+        (str(role_id) if role_id else None, str(guild_id)),
+    )
     conn.commit()
 
 

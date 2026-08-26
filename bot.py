@@ -529,18 +529,32 @@ async def on_voice_state_update(member, before, after) -> None:
 # ── permissions + shared add-to-library ─────────────────────────────────────
 
 def _may(interaction: discord.Interaction, action: str) -> bool:
-    """Permission gate for add/mutate commands. Open today — a private friends
-    server, so everyone may do everything. This is the single place a role model
-    plugs in when the bot lands on a bigger server (see the mercuryradio
-    permissions someday project); the handlers route through it so that's one
-    function then, not a rewrite of each command."""
-    return True
+    """Permission gate for add/mutate commands. Only /add + /youtube are gated;
+    everything else is open. A guild with no add-role set is open to all (his
+    friend servers); once an admin sets one with /perms, only members with that
+    role (server admins always) may add. Role comes from the interaction member,
+    so no privileged members intent is needed."""
+    if action not in ("add", "youtube"):
+        return True
+    if interaction.guild_id is None:
+        return True
+    perms = getattr(interaction.user, "guild_permissions", None)
+    if perms and perms.manage_guild:  # admins are never locked out
+        return True
+    role_id = db.get_add_role(conn, interaction.guild_id)
+    if not role_id:
+        return True  # no role configured -> open
+    member_roles = getattr(interaction.user, "roles", [])
+    return any(str(r.id) == str(role_id) for r in member_roles)
 
 
 async def _gate(interaction: discord.Interaction, action: str) -> bool:
     if _may(interaction, action):
         return True
-    await interaction.response.send_message("You don't have permission to do that here.", ephemeral=True)
+    role_id = db.get_add_role(conn, interaction.guild_id) if interaction.guild_id else None
+    where = f" — you need the <@&{role_id}> role" if role_id else ""
+    await interaction.response.send_message(
+        f"You don't have permission to add music here{where}.", ephemeral=True)
     return False
 
 
@@ -595,7 +609,7 @@ async def help_cmd(interaction: discord.Interaction) -> None:
         name="Commands",
         value="`/request` a track to play next · `/add` a file to the library · `/skip` the current "
               "song · `/myratings` your history · `/join` / `/leave` the radio · "
-              "`/setup` (admin) point it at a channel.",
+              "`/setup` (admin) point it at a channel · `/perms` (admin) restrict who can add.",
         inline=False,
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -620,6 +634,26 @@ async def setup(interaction: discord.Interaction, voice: discord.VoiceChannel,
         ephemeral=True,
     )
     await _serve_guild(radio)
+
+
+@tree.command(name="perms", description="Restrict /add and /youtube to a role (admin). Omit the role to open to all.")
+@app_commands.describe(add_role="Role allowed to add music — leave empty to allow everyone")
+async def perms(interaction: discord.Interaction, add_role: discord.Role | None = None) -> None:
+    if interaction.guild_id is None:
+        await interaction.response.send_message("Run this in a server.", ephemeral=True)
+        return
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("You need Manage Server to change permissions.", ephemeral=True)
+        return
+    if db.get_guild(conn, interaction.guild_id) is None:
+        await interaction.response.send_message("This server isn't set up — an admin runs /setup first.", ephemeral=True)
+        return
+    db.set_add_role(conn, interaction.guild_id, add_role.id if add_role else None)
+    if add_role:
+        msg = f"🔒 Only members with **{add_role.name}** (and server admins) can /add or /youtube now."
+    else:
+        msg = "🔓 /add and /youtube are open to everyone here."
+    await interaction.response.send_message(msg, ephemeral=True)
 
 
 @tree.command(name="join", description="Start the radio in the server's voice channel.")
