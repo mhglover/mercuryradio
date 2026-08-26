@@ -755,7 +755,8 @@ async def add(interaction: discord.Interaction, file: discord.Attachment) -> Non
     if not created:
         await interaction.followup.send(f"**{artist} – {title}** is already in the library — /request it.", ephemeral=True)
         return
-    await interaction.channel.send(f"🎵 Added **{artist} – {title}** to the library — /request it.")
+    await interaction.channel.send(
+        f"🎵 **{interaction.user.display_name}** added **{artist} – {title}** to the library — /request it.")
     await interaction.followup.send(f"Added **{artist} – {title}** ✓", ephemeral=True)
 
 
@@ -831,7 +832,8 @@ async def youtube(interaction: discord.Interaction, url: str,
         await interim.edit(content=f"**{lib_artist} – {lib_title}** is already in the library — /request it.")
         return
     await interim.edit(content=f"Added **{lib_artist} – {lib_title}** ✓")
-    await interaction.channel.send(f"🎵 Added **{lib_artist} – {lib_title}** from YouTube — /request it.")
+    await interaction.channel.send(
+        f"🎵 **{interaction.user.display_name}** added **{lib_artist} – {lib_title}** from YouTube — /request it.")
 
 
 @tree.command(name="recent", description="Show recently played tracks and rate any you missed.")
