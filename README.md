@@ -83,7 +83,9 @@ Copy `.env.sample` to `.env` and set:
   .opus .wav .wma`).
 - `DB_PATH` / `DATA_DIR` — where the SQLite DB lives (local default `./data`).
 - `ADDED_DIR` — **optional**, writable ingest dir for `/add` and `/youtube` files; defaults to an
-  `added/` subdir next to the DB, so it works with no extra mount.
+  `added/` subdir next to the DB, so it works with no extra mount. Point it at a writable folder
+  **inside your library** (mount that subfolder rw and set `ADDED_DIR` to it — see
+  `deploy/compose.nas.yaml`) to make added tracks part of the collection on one canonical path.
 - `MAX_ADD_MINUTES` — **optional**, cap on a `/youtube` pull (default 20). Longer videos are rejected
   at the pre-fetch, before any download.
 - `GUILD_ID` / `VOICE_CHANNEL_ID` / `NOWPLAYING_CHANNEL_ID` — **optional**, seed-only (see below).

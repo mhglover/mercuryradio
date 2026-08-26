@@ -23,7 +23,14 @@ services:
       NOWPLAYING_CHANNEL_ID: ${NOWPLAYING_CHANNEL_ID:-}
       MUSIC_DIR: /music
       DB_PATH: /data/mercuryradio.db
+      # /add + /youtube land here — a writable subfolder mounted INSIDE the read-only
+      # library, so added tracks become part of the collection (one canonical path, and
+      # a media server pointed at the library sees them). The source library stays :ro.
+      ADDED_DIR: /music/_Added
       PYTHONUNBUFFERED: "1"  # flush print() to the container log immediately
     volumes:
       - ${MUSIC_DIR:?set MUSIC_DIR to your library host path}:/music:ro
       - ${DATA_DIR:?set DATA_DIR to a host dir for the SQLite DB}:/data
+      # Writable _Added subfolder nested inside the ro library mount (host path derived
+      # from MUSIC_DIR). This is what makes ADDED_DIR above writable.
+      - ${MUSIC_DIR}/_Added:/music/_Added
