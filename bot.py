@@ -472,6 +472,11 @@ async def _sync_commands_to(guild) -> None:
     (a plain global sync can take up to an hour to propagate)."""
     try:
         tree.copy_global_to(guild=guild)
+        # Adding off for this guild -> don't register /add + /youtube at all, so they're
+        # invisible in the command picker (not just refused). /perms turns them on.
+        if conn is not None and not db.add_enabled(conn, guild.id):
+            for name in ("add", "youtube"):
+                tree.remove_command(name, guild=guild)
         await tree.sync(guild=guild)
     except discord.HTTPException as e:
         print(f"command sync failed for guild {getattr(guild, 'id', '?')}: {e}")
@@ -538,6 +543,8 @@ def _may(interaction: discord.Interaction, action: str) -> bool:
         return True
     if interaction.guild_id is None:
         return True
+    if not db.add_enabled(conn, interaction.guild_id):
+        return False  # adding is off here (commands aren't even registered)
     perms = getattr(interaction.user, "guild_permissions", None)
     if perms and perms.manage_guild:  # admins are never locked out
         return True
@@ -636,9 +643,13 @@ async def setup(interaction: discord.Interaction, voice: discord.VoiceChannel,
     await _serve_guild(radio)
 
 
-@tree.command(name="perms", description="Restrict /add and /youtube to a role (admin). Omit the role to open to all.")
-@app_commands.describe(add_role="Role allowed to add music — leave empty to allow everyone")
-async def perms(interaction: discord.Interaction, add_role: discord.Role | None = None) -> None:
+@tree.command(name="perms", description="Control who can add music on this server (admin).")
+@app_commands.describe(
+    adding="Turn /add + /youtube on or off here — off hides them from the command list entirely",
+    add_role="When adding is on, limit it to this role — pass @everyone to open it to all",
+)
+async def perms(interaction: discord.Interaction, adding: bool | None = None,
+                add_role: discord.Role | None = None) -> None:
     if interaction.guild_id is None:
         await interaction.response.send_message("Run this in a server.", ephemeral=True)
         return
@@ -648,12 +659,21 @@ async def perms(interaction: discord.Interaction, add_role: discord.Role | None 
     if db.get_guild(conn, interaction.guild_id) is None:
         await interaction.response.send_message("This server isn't set up — an admin runs /setup first.", ephemeral=True)
         return
-    db.set_add_role(conn, interaction.guild_id, add_role.id if add_role else None)
-    if add_role:
-        msg = f"🔒 Only members with **{add_role.name}** (and server admins) can /add or /youtube now."
-    else:
-        msg = "🔓 /add and /youtube are open to everyone here."
-    await interaction.response.send_message(msg, ephemeral=True)
+    parts = []
+    if adding is not None:
+        db.set_add_enabled(conn, interaction.guild_id, adding)
+        await _sync_commands_to(interaction.guild)  # register/unregister the commands -> show/hide
+        parts.append("🔓 adding is **on**" if adding else "🔒 adding is **off** (commands hidden)")
+    if add_role is not None:
+        open_all = add_role.id == interaction.guild_id  # the @everyone role's id == guild id
+        db.set_add_role(conn, interaction.guild_id, None if open_all else add_role.id)
+        parts.append("anyone may add" if open_all else f"limited to **{add_role.name}** (and admins)")
+    if not parts:  # no args -> report current state
+        on = db.add_enabled(conn, interaction.guild_id)
+        rid = db.get_add_role(conn, interaction.guild_id)
+        who = f"<@&{rid}> (and admins)" if rid else "everyone"
+        parts.append(f"Adding is **{'on' if on else 'off'}**; when on, {who} can add.")
+    await interaction.response.send_message(" · ".join(parts), ephemeral=True)
 
 
 @tree.command(name="join", description="Start the radio in the server's voice channel.")

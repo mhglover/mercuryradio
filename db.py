@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS guilds (
     nowplaying_channel_id TEXT,
     music_dir             TEXT,
     add_role_id           TEXT,   -- role allowed to /add + /youtube; NULL = open to all
+    add_enabled           INTEGER NOT NULL DEFAULT 0,  -- 0 = /add + /youtube not registered (hidden)
     enabled               INTEGER NOT NULL DEFAULT 1,
     added                 TEXT NOT NULL
 );
@@ -121,6 +122,13 @@ def _migrate(conn) -> None:
     gcols = {r["name"] for r in conn.execute("PRAGMA table_info(guilds)")}
     if "add_role_id" not in gcols:
         conn.execute("ALTER TABLE guilds ADD COLUMN add_role_id TEXT")
+        conn.commit()
+    # add_enabled controls whether /add + /youtube are registered (visible) per guild.
+    # New servers default off (hidden); grandfather every server that predates this column
+    # to on, so existing rooms keep the adding they already had.
+    if "add_enabled" not in gcols:
+        conn.execute("ALTER TABLE guilds ADD COLUMN add_enabled INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE guilds SET add_enabled = 1")
         conn.commit()
 
 
@@ -279,6 +287,21 @@ def set_add_role(conn, guild_id, role_id) -> None:
     conn.execute(
         "UPDATE guilds SET add_role_id = ? WHERE guild_id = ?",
         (str(role_id) if role_id else None, str(guild_id)),
+    )
+    conn.commit()
+
+
+def add_enabled(conn, guild_id) -> bool:
+    """Whether /add + /youtube are turned on (and thus registered/visible) in this guild.
+    Unknown guild -> False (a server the bot just joined shows no add commands until setup)."""
+    row = conn.execute("SELECT add_enabled FROM guilds WHERE guild_id = ?", (str(guild_id),)).fetchone()
+    return bool(row["add_enabled"]) if row else False
+
+
+def set_add_enabled(conn, guild_id, on: bool) -> None:
+    conn.execute(
+        "UPDATE guilds SET add_enabled = ? WHERE guild_id = ?",
+        (1 if on else 0, str(guild_id)),
     )
     conn.commit()
 
