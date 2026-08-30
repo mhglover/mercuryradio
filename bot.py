@@ -587,11 +587,13 @@ def _may(interaction: discord.Interaction, action: str) -> bool:
     friend servers); once an admin sets one with /perms, only members with that
     role (server admins always) may add. Role comes from the interaction member,
     so no privileged members intent is needed."""
-    if action not in ("add", "youtube"):
+    if action not in ("add", "youtube", "retag"):
         return True
     if interaction.guild_id is None:
         return True
-    if not db.add_enabled(conn, interaction.guild_id):
+    # add/youtube are the per-guild toggle (and get hidden when off); retag isn't
+    # part of that — it's a correction, gated only by the same role.
+    if action in ("add", "youtube") and not db.add_enabled(conn, interaction.guild_id):
         return False  # adding is off here (commands aren't even registered)
     perms = getattr(interaction.user, "guild_permissions", None)
     if perms and perms.manage_guild:  # admins are never locked out
@@ -664,6 +666,7 @@ async def help_cmd(interaction: discord.Interaction) -> None:
         name="Commands",
         value="`/request` a track to play next · `/add` a file to the library · `/skip` the current "
               "song · `/myratings` your history · `/join` / `/leave` the radio · "
+              "`/retag` fix a track's artist/title · "
               "`/setup` (admin) point it at a channel · `/perms` (admin) restrict who can add.",
         inline=False,
     )
@@ -812,6 +815,46 @@ async def rate(interaction: discord.Interaction, track: str, rating: app_command
 
 # Same free-text -> track-id autocomplete as /request.
 rate.autocomplete("track")(_request_autocomplete)
+
+
+@tree.command(name="retag", description="Fix a track's artist/title (e.g. a YouTube add tagged with the channel name).")
+@app_commands.describe(track="The track to fix — start typing to pick it",
+                       artist="Correct artist (leave empty to keep)",
+                       title="Correct title (leave empty to keep)")
+async def retag(interaction: discord.Interaction, track: str,
+                artist: str | None = None, title: str | None = None) -> None:
+    if not await _gate(interaction, "retag"):
+        return
+    if not artist and not title:
+        await interaction.response.send_message("Give a new artist and/or title to set.", ephemeral=True)
+        return
+    row = _resolve_track(track)
+    if row is None:
+        await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
+        return
+    new_artist = (artist or row["artist"]).strip()
+    new_title = (title or row["title"]).strip()
+    ok, info = db.retag_track(conn, row["id"], new_artist, new_title)
+    if not ok:
+        await interaction.response.send_message(info, ephemeral=True)
+        return
+    library.write_tags(info, new_artist, new_title)  # info = path; keeps a rescan from re-drifting
+    await interaction.response.send_message(f"🏷️ Retagged to **{new_artist} – {new_title}**.", ephemeral=True)
+    # If it's the track playing here right now, fix the card in place.
+    radio = _radio(interaction.guild_id) if interaction.guild_id else None
+    if radio and radio.current_row and radio.current_row["id"] == row["id"]:
+        radio.current_row["artist"], radio.current_row["title"] = new_artist, new_title
+        radio.current_track = f"{new_artist} – {new_title}"
+        if radio.np_message and radio.np_message.embeds:
+            embed = radio.np_message.embeds[0]
+            embed.title = f"{new_artist} – {new_title}"
+            try:
+                await radio.np_message.edit(embed=embed)
+            except discord.HTTPException:
+                pass
+
+
+retag.autocomplete("track")(_request_autocomplete)
 
 
 @tree.command(name="myratings", description="Show a summary of your ratings and your most recent ones.")

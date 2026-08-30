@@ -152,6 +152,29 @@ def upsert_track(conn, artist, title, album, path, duration=None) -> int:
     return cur.lastrowid
 
 
+def retag_track(conn, track_id: int, artist: str, title: str) -> tuple[bool, str]:
+    """Fix a track's artist/title. Recomputes norm_key (album kept) so dedup stays
+    correct; ratings and play_history are keyed on track_id, so they follow the fix.
+    Returns (True, path) on success — the caller syncs the file's tags so a rescan
+    won't re-drift — or (False, message) if the track is gone or the new tags would
+    collide with a different existing track."""
+    row = conn.execute("SELECT album, path FROM tracks WHERE id = ?", (track_id,)).fetchone()
+    if not row:
+        return False, "That track isn't in the library any more."
+    key = norm_key(artist, title, row["album"])
+    clash = conn.execute(
+        "SELECT id FROM tracks WHERE norm_key = ? AND id != ?", (key, track_id)
+    ).fetchone()
+    if clash:
+        return False, f"A different track already has those tags (**{artist} – {title}**)."
+    conn.execute(
+        "UPDATE tracks SET artist = ?, title = ?, norm_key = ? WHERE id = ?",
+        (artist, title, key, track_id),
+    )
+    conn.commit()
+    return True, row["path"]
+
+
 def track_id_for_key(conn, key: str) -> int | None:
     row = conn.execute("SELECT id FROM tracks WHERE norm_key = ?", (key,)).fetchone()
     return row["id"] if row else None
