@@ -365,8 +365,11 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
     if cover:
         kwargs["file"] = discord.File(io.BytesIO(cover), filename="cover.png")
     kwargs["embed"] = _build_embed(radio, row, voice_channel, has_cover=bool(cover))
+    # silent=True: the card posts and its sidebar stays live, but it fires NO
+    # notification/push. A new message every ~3 min would otherwise ping everyone
+    # watching the channel, listener or not.
     try:
-        radio.np_message = await channel.send(**kwargs)
+        radio.np_message = await channel.send(**kwargs, silent=True)
     except discord.HTTPException as e:
         print(f"could not post now-playing card: {e}")
         radio.np_message = None
