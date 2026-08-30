@@ -42,10 +42,8 @@ The bot is now in your server but idle — it starts serving once you configure 
 
 ## Step 3 — Get the code
 
-Clone the repository (ask the project owner for access or the repo URL):
-
 ```
-git clone <repo-url> mercuryradio && cd mercuryradio
+git clone https://github.com/mhglover/mercuryradio.git && cd mercuryradio
 ```
 
 ## Step 4 — Configure
