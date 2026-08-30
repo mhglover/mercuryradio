@@ -2,16 +2,13 @@
 
 Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
-## Unreleased
+## 2026-08-30
 
 - **Fixed the speed-up/slow-down artifact.** Playback now reads ahead into a buffer and
   **prefetches the next track** a few seconds before the current one ends, so ffmpeg's
   startup no longer makes the player rush to catch up. Track changes are near-seamless, and
   skips to an already-prefetched track are instant. A rare buffer underrun inserts a tiny
   silence instead of speeding up.
-
-## 2026-08-30
-
 - **The now-playing card no longer pings the channel.** It posts as a silent message,
   so a song change never sends a notification to people who aren't listening.
 - **Fixed "sticky" now-playing cards.** The card is now a single message edited in place
