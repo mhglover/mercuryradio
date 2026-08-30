@@ -233,7 +233,7 @@ def next_request(conn, guild_id: str) -> sqlite3.Row | None:
     """The oldest unplayed request FOR THIS GUILD as a playable track row, or None.
     Scoped per guild so a shared ratings DB doesn't bleed requests across servers."""
     return conn.execute(
-        "SELECT t.id, t.path, t.artist, t.title FROM requests req "
+        "SELECT t.id, t.path, t.artist, t.title, t.duration FROM requests req "
         "JOIN tracks t ON t.id = req.track_id "
         "WHERE req.played_at IS NULL AND req.guild_id = ? "
         "ORDER BY req.requested_at ASC LIMIT 1",

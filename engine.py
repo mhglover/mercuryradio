@@ -31,7 +31,7 @@ def new_block(pending_requests: int = 0) -> list:
     random.shuffle(block)
     return block
 
-_COLS = "t.id, t.path, t.artist, t.title"
+_COLS = "t.id, t.path, t.artist, t.title, t.duration"
 _NOT_AUDIOBOOK = "t.path NOT LIKE '%/Audiobooks/%'"
 # Skip anything played inside the timeout window and the artists of the last few
 # plays (no back-to-back artist). Both read straight from play_history.
