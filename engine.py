@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 # allpos, fresh — composed then shuffled so the shape isn't audible. The request
 # slot falls back to rating-music when the queue is empty, so it costs nothing on
 # a quiet night. 'wildcard' (pure discovery) stays in the fallback chain, not the
-# base block. See ~/Personal/Notes/shasradio design.md.
+# base block. (Faithful to the original shasradio radiod.pl block composition.)
 BLOCK_TYPES = ["request", "top", "top", "allpos", "fresh"]
 
 # shasradio grew the block by a slot when the request backlog built up, so demand

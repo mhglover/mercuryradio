@@ -9,6 +9,9 @@ listener set.
 The code ships **no music** — you point it at your own library. Copyright posture of what you
 stream is yours to hold.
 
+**Want to run your own instance, with your own library?** See **[SETUP.md](SETUP.md)** — a
+step-by-step host-your-own walkthrough (create the bot, invite it, configure, run, `/setup`).
+
 ## How it works
 
 On startup the bot loads its SQLite library (or scans `MUSIC_DIR` into it on first run, tags via
