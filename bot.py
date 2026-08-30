@@ -16,6 +16,7 @@ import asyncio
 import io
 import os
 import signal
+import time
 
 import discord
 from discord import app_commands
@@ -46,6 +47,48 @@ _SEED_NP_ID = int(os.environ.get("NOWPLAYING_CHANNEL_ID") or 0) or None
 # smooths the frame pacing (Python-side encode lag is what makes the beat "speed up").
 FFMPEG_OPTS = {"before_options": "-err_detect ignore_err -fflags +discardcorrupt", "options": "-vn"}
 STREAM_BITRATE = 128  # kbps Opus; avoids FFmpegOpusAudio's blocking probe
+# Diagnostic (set PACE_DEBUG=1): log when playback pacing slips, and split a slow
+# read (ffmpeg/disk stall) from a stalled send thread (GIL/scheduler). Off by default.
+PACE_DEBUG = bool(os.environ.get("PACE_DEBUG"))
+
+
+class _TimedOpus(discord.AudioSource):
+    """Wraps an Opus source to log pacing slips. discord.py reads one 20ms frame per
+    ~20ms; a big GAP before a read means the send thread couldn't run (GIL/scheduler),
+    while a slow read() itself means the source (ffmpeg/disk) stalled. Logging both
+    tells the two apart. Overhead is a couple of perf_counter calls per frame."""
+
+    def __init__(self, source, label):
+        self._src = source
+        self._label = label[:60]
+        self._last = None
+        self._n = 0
+        self._slips = 0
+
+    def is_opus(self):
+        return True
+
+    def read(self):
+        now = time.perf_counter()
+        if self._last is not None:
+            gap = (now - self._last) * 1000  # ms since the previous read started (~20 normal)
+            if gap > 35:
+                self._slips += 1
+                print(f"[pace] {self._label} f{self._n}: {gap:.0f}ms gap before read "
+                      f"— SEND-THREAD stall (GIL/sched); slips={self._slips}")
+        t0 = time.perf_counter()
+        data = self._src.read()
+        dur = (time.perf_counter() - t0) * 1000
+        if dur > 15:
+            self._slips += 1
+            print(f"[pace] {self._label} f{self._n}: read() took {dur:.0f}ms "
+                  f"— SOURCE stall (ffmpeg/disk); slips={self._slips}")
+        self._last = now  # frame cadence = read-start to read-start (~20ms)
+        self._n += 1
+        return data
+
+    def cleanup(self):
+        self._src.cleanup()
 
 # A rating within this window counts a user as present (for scoring + the sidebar)
 # even without joining voice — for listeners sharing one speaker/connection.
@@ -168,6 +211,8 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
     if seek > 0:  # input seek goes first, keep the error-tolerance flags after it
         opts["before_options"] = f"-ss {seek} {opts['before_options']}"
     source = discord.FFmpegOpusAudio(row["path"], bitrate=STREAM_BITRATE, **opts)
+    if PACE_DEBUG:
+        source = _TimedOpus(source, radio.current_track)
     vc.play(source, after=lambda err: _after(radio, vc, err, row["path"]))
     await _post_nowplaying(radio, vc.channel, row)
 
