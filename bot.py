@@ -125,7 +125,8 @@ class GuildRadio:
         self.active = False        # True only while a human is in the VC
         self.current_row = None    # the track playing now
         self.current_track = None  # "artist – title" for status
-        self.np_message = None     # the live now-playing card
+        self.np_message = None     # the live now-playing card (ONE per guild, edited in place)
+        self.card_lock = asyncio.Lock()  # serialize card ops so a track change can't leak a card
         self.recent_artists = []   # rolling window for the topic
         self.since_topic = 0       # tracks played since the topic was refreshed
 
@@ -340,71 +341,96 @@ class _RecentRatingButton(discord.ui.Button):
         await interaction.response.edit_message(content=self.view.body_for(uid), view=self.view)
 
 
+async def _delete_card(radio: GuildRadio) -> None:
+    """Remove this guild's card. Lock-free — the caller must hold card_lock."""
+    if radio.np_message is not None:
+        msg, radio.np_message = radio.np_message, None
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass
+
+
 async def _refresh_sidebar(radio: GuildRadio) -> None:
     """Rebuild the sidebar on this guild's card. Reads the VOICE channel for
-    presence, not the card's text channel."""
-    if radio.np_message is None or radio.current_row is None:
-        return
-    guild = radio.np_message.guild
-    vc = guild.voice_client if guild else None
-    voice_channel = vc.channel if vc else radio.np_message.channel
-    embed = radio.np_message.embeds[0]
-    embed.set_field_at(0, name="Ratings", value=_sidebar(radio, voice_channel, radio.current_row["id"]), inline=False)
-    try:
-        await radio.np_message.edit(embed=embed)
-    except discord.HTTPException:
-        pass
+    presence, not the card's text channel. Serialized by card_lock so it can't
+    race a track change replacing the card."""
+    async with radio.card_lock:
+        if radio.np_message is None or radio.current_row is None:
+            return
+        guild = radio.np_message.guild
+        vc = guild.voice_client if guild else None
+        voice_channel = vc.channel if vc else radio.np_message.channel
+        embed = radio.np_message.embeds[0]
+        embed.set_field_at(0, name="Ratings", value=_sidebar(radio, voice_channel, radio.current_row["id"]), inline=False)
+        try:
+            await radio.np_message.edit(embed=embed)
+        except discord.HTTPException:
+            pass
 
 
 async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
-    """Replace this guild's now-playing card for a new track."""
-    await _clear_nowplaying(radio, clear_status=False)
-    channel = _np_channel(radio, voice_channel)
-    cover = library.extract_cover(row["path"])
-    kwargs = {"view": RatingView()}
-    if cover:
-        kwargs["file"] = discord.File(io.BytesIO(cover), filename="cover.png")
-    kwargs["embed"] = _build_embed(radio, row, voice_channel, has_cover=bool(cover))
-    # silent=True: the card posts and its sidebar stays live, but it fires NO
-    # notification/push. A new message every ~3 min would otherwise ping everyone
-    # watching the channel, listener or not.
-    try:
-        radio.np_message = await channel.send(**kwargs, silent=True)
-    except discord.HTTPException as e:
-        print(f"could not post now-playing card: {e}")
-        radio.np_message = None
-    try:  # bot status is global (one per bot); with N guilds it shows the latest track
-        await client.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.listening, name=f"{row['artist']} – {row['title']}")
-        )
-    except discord.HTTPException:
-        pass
-    # Reflect recent artists in the channel topic, every TOPIC_EVERY tracks — Discord
-    # throttles channel edits to ~2 per 10 min, so a per-song edit gets 429'd.
-    radio.recent_artists.append(row["artist"])
-    del radio.recent_artists[:-TOPIC_EVERY]
-    radio.since_topic += 1
-    if radio.since_topic >= TOPIC_EVERY:
-        radio.since_topic = 0
-        recent = list(dict.fromkeys(radio.recent_artists))
-        try:
-            await channel.edit(topic="🎵 Recent: " + ", ".join(recent))
-        except (discord.HTTPException, AttributeError) as e:
-            print(f"could not set channel topic: {e}")
+    """Show/refresh this guild's ONE now-playing card for a new track. EDITS the
+    existing card in place instead of delete-and-repost — that per-track delete is
+    what leaked 'sticky' cards: a delete that failed transiently still nulled the
+    reference (orphaning the on-screen card forever), and concurrent updates could
+    overwrite the reference without deleting. Serialized by card_lock; reposts only
+    when there's no card, the target channel changed, or the card was deleted out
+    from under us. silent=True so a track change fires no notification."""
+    async with radio.card_lock:
+        channel = _np_channel(radio, voice_channel)
+        cover = library.extract_cover(row["path"])
+        msg = radio.np_message
+        if msg is not None and msg.channel.id != channel.id:
+            await _delete_card(radio)  # card channel changed (e.g. /setup) -> retire it
+            msg = None
+        if msg is not None:
+            try:
+                file = discord.File(io.BytesIO(cover), filename="cover.png") if cover else None
+                embed = _build_embed(radio, row, voice_channel, has_cover=bool(cover))
+                await msg.edit(embed=embed, view=RatingView(), attachments=[file] if file else [])
+            except discord.NotFound:
+                radio.np_message = None  # someone deleted the card -> repost below
+            except discord.HTTPException as e:
+                print(f"now-playing card edit failed (keeping the card, retry next track): {e}")
+        if radio.np_message is None:  # first track, channel changed, or card vanished
+            file = discord.File(io.BytesIO(cover), filename="cover.png") if cover else None
+            embed = _build_embed(radio, row, voice_channel, has_cover=bool(cover))
+            send_kwargs = {"embed": embed, "view": RatingView()}
+            if file:
+                send_kwargs["file"] = file
+            try:
+                radio.np_message = await channel.send(**send_kwargs, silent=True)
+            except discord.HTTPException as e:
+                print(f"could not post now-playing card: {e}")
+        try:  # bot status is global (one per bot); with N guilds it shows the latest track
+            await client.change_presence(
+                activity=discord.Activity(type=discord.ActivityType.listening, name=f"{row['artist']} – {row['title']}")
+            )
+        except discord.HTTPException:
+            pass
+        # Reflect recent artists in the channel topic, every TOPIC_EVERY tracks — Discord
+        # throttles channel edits to ~2 per 10 min, so a per-song edit gets 429'd.
+        radio.recent_artists.append(row["artist"])
+        del radio.recent_artists[:-TOPIC_EVERY]
+        radio.since_topic += 1
+        if radio.since_topic >= TOPIC_EVERY:
+            radio.since_topic = 0
+            recent = list(dict.fromkeys(radio.recent_artists))
+            try:
+                await channel.edit(topic="🎵 Recent: " + ", ".join(recent))
+            except (discord.HTTPException, AttributeError) as e:
+                print(f"could not set channel topic: {e}")
 
 
 async def _clear_nowplaying(radio: GuildRadio, clear_status: bool = True) -> None:
-    if radio.np_message is not None:
-        try:
-            await radio.np_message.delete()
-        except discord.HTTPException:
-            pass
-        radio.np_message = None
-    if clear_status and not any(r.active for r in radios.values()):
-        try:  # only clear the global status when no guild is still playing
-            await client.change_presence(activity=None)
-        except discord.HTTPException:
-            pass
+    async with radio.card_lock:
+        await _delete_card(radio)
+        if clear_status and not any(r.active for r in radios.values()):
+            try:  # only clear the global status when no guild is still playing
+                await client.change_presence(activity=None)
+            except discord.HTTPException:
+                pass
 
 
 # ── discord wiring ──────────────────────────────────────────────────────────
