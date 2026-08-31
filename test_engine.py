@@ -74,12 +74,15 @@ def test_new_block_shuffles_and_grows_with_backlog():
     assert grown.count("request") == 2
 
 
-def test_request_queue_is_fifo_and_guild_scoped():
+def test_request_queue_is_fifo_across_users_and_guild_scoped():
+    # FIFO holds ACROSS users; within one user, fairness applies — a second request
+    # replaces the first (2026-08-31 rule; the per-user stacking this test used to
+    # assert is exactly the behavior that rule removed — see test_request_fairness.py).
     conn, t, _ab = _seed()
     g1, g2 = "guildA", "guildB"
     assert db.next_request(conn, g1) is None
     db.add_request(conn, t[("C", "c1")], g1, "u1")
-    db.add_request(conn, t[("D", "d1")], g1, "u1")
+    db.add_request(conn, t[("D", "d1")], g1, "u3")  # a second USER, so both stand
     db.add_request(conn, t[("B", "b1")], g2, "u2")  # a request on the OTHER server
     r1 = db.next_request(conn, g1)
     assert (r1["artist"], r1["title"]) == ("C", "c1")  # FIFO within the guild
