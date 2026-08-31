@@ -30,6 +30,9 @@ asymmetric: hate −4 · dislike −1 · shrug 0 · like +1 · love +2.
 - **Verify for real, not by import.** `python -c "import bot"` catches syntax, nothing else. Voice
   bugs only surface on `vc.play` — decode a real file with `ffmpeg` and run a `docker build` before
   claiming it works.
+- **Run the suite locally before every push — the pre-push hook enforces it.** Install once
+  per clone: `git config core.hooksPath .githooks`. It runs pytest always and a `docker build`
+  when the push touches Dockerfile/pyproject/uv.lock. CI is the backstop, not the first line.
 - **Never pipe a verification.** `pytest | tail` reports tail's exit code, not pytest's — a failing
   suite reads as green and `&&` chains commit/push right past it (bit twice on 2026-08-31 alone).
   Run the check bare, or send full output to a file and read the file; branch on the check's own

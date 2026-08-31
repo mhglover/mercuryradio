@@ -1,0 +1,17 @@
+#!/bin/sh
+# Blocks a push that would fail CI: the test suite always (sub-second), a docker build
+# when the push touches image inputs. Install once per clone:
+#   git config core.hooksPath .githooks
+# Added 2026-08-31 after a failing suite rode a masked-exit chain to a red CI run.
+set -e
+
+echo "pre-push: running the test suite"
+uv run --with pytest pytest -q
+
+# Build the image only when what goes INTO the image changed in the outgoing commits.
+range=$(git rev-parse @{push} 2>/dev/null || echo origin/main)
+if git diff --name-only "$range"..HEAD 2>/dev/null | grep -qE '^(Dockerfile|pyproject\.toml|uv\.lock)$'; then
+    echo "pre-push: image inputs changed — running docker build"
+    docker build -q -t mercuryradio:prepush . >/dev/null
+fi
+echo "pre-push: OK"
