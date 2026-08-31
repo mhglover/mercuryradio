@@ -252,12 +252,32 @@ def search_tracks(conn, query: str, limit: int = 25) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def add_request(conn, track_id: int, guild_id: str, user_id: str | None = None) -> None:
+def add_request(conn, track_id: int, guild_id: str, user_id: str | None = None) -> str | None:
+    """One pending request per user per guild — request fairness (2026-08-31, his rule:
+    "changing your request should kick you to the back of the request queue"). A new
+    request DELETES the user's pending one(s) and inserts fresh, so it sorts to the back
+    and nobody can stack the queue. Returns the replaced pending track as
+    "Artist – Title", or None if the user had nothing pending."""
+    replaced = None
+    if user_id is not None:
+        row = conn.execute(
+            "SELECT t.artist, t.title FROM requests req JOIN tracks t ON t.id = req.track_id "
+            "WHERE req.user_id = ? AND req.guild_id = ? AND req.played_at IS NULL "
+            "ORDER BY req.requested_at ASC LIMIT 1",
+            (user_id, guild_id),
+        ).fetchone()
+        if row:
+            replaced = f"{row['artist']} – {row['title']}"
+            conn.execute(
+                "DELETE FROM requests WHERE user_id = ? AND guild_id = ? AND played_at IS NULL",
+                (user_id, guild_id),
+            )
     conn.execute(
         "INSERT INTO requests (track_id, guild_id, user_id, requested_at) VALUES (?, ?, ?, ?)",
         (track_id, guild_id, user_id, _now()),
     )
     conn.commit()
+    return replaced
 
 
 def next_request(conn, guild_id: str) -> sqlite3.Row | None:

@@ -1073,10 +1073,17 @@ async def request(interaction: discord.Interaction, track: str) -> None:
     if row is None:
         await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
         return
-    db.add_request(conn, row["id"], str(interaction.guild_id), str(interaction.user.id))
+    replaced = db.add_request(conn, row["id"], str(interaction.guild_id), str(interaction.user.id))
     ahead = db.pending_request_count(conn, str(interaction.guild_id)) - 1
     when = "plays in the next block" if ahead <= 0 else f"{ahead} request(s) ahead of it"
-    await interaction.response.send_message(f"Queued **{row['artist']} – {row['title']}** — {when}.", ephemeral=True)
+    new_label = f"{row['artist']} – {row['title']}"
+    if replaced == new_label:
+        msg = f"**{new_label}** was already your request — moved to the back of the queue ({when})."
+    elif replaced:
+        msg = f"Swapped your request: **{replaced}** → **{new_label}** — back of the queue, {when}."
+    else:
+        msg = f"Queued **{new_label}** — {when}."
+    await interaction.response.send_message(msg, ephemeral=True)
 
 
 @request.autocomplete("track")

@@ -59,7 +59,8 @@ listeners away and the score doesn't exist.**
 
 - `/join` — start the radio in this server's voice channel (or just join the channel; it follows you in).
 - `/skip` — skip the current track.
-- `/request <track>` — queue a track to play next; autocompletes over the library.
+- `/request <track>` — queue a track to play next; autocompletes over the library. One pending
+  request per person — a new one replaces yours and goes to the back of the queue.
 - `/add <file>` — add an audio file to the shared library. It's tagged, saved, and immediately
   requestable. `MUSIC_DIR` stays read-only; uploads land in a separate writable ingest dir
   (`ADDED_DIR`, defaulting inside `/data` so no extra mount is needed).

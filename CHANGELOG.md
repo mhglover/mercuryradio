@@ -4,6 +4,9 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **Request fairness: one pending request each.** A new `/request` replaces your pending
+  one and goes to the back of the queue — changing your mind costs your spot, and nobody
+  can stack the queue. The reply says what got swapped.
 - **A time bar on the card.** Under the album: how far into the song the room is and how
   long it runs, as of the card's last redraw — it refreshes whenever someone rates or the
   track changes. (Deliberately not live-ticking; Discord rate-limits per-second edits.)
