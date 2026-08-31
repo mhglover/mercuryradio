@@ -75,13 +75,22 @@ your server with `/setup` in Step 6 instead.
 
 ## Step 5 — Run it
 
+**Easiest — use the prebuilt image.** CI publishes a multi-arch (amd64 + arm64) image on
+every release: `ghcr.io/mhglover/mercuryradio:latest`, no login needed to pull. The stack
+file for it is `deploy/compose.nas.yaml`:
+
+```
+docker compose -f deploy/compose.nas.yaml up -d
+```
+
+(In Portainer: create a stack, paste `deploy/compose.nas.yaml`, and set the env values
+from Step 4 in the stack's Environment section.)
+
+**Or build it yourself** from the checkout — same result, just slower the first time:
+
 ```
 docker compose up -d --build
 ```
-
-(Or skip the build: CI publishes a ready-made multi-arch image on every release —
-`ghcr.io/mhglover/mercuryradio:latest` — and `deploy/compose.nas.yaml` shows a
-pull-based stack that uses it. Handy on a NAS or anywhere you'd rather not build.)
 
 Watch the logs the first time:
 
@@ -126,6 +135,20 @@ bot token — add each with `/setup` in that server. Ratings and the library are
 across them (a listener's taste follows them); requests and presence are per-server. If you'd
 rather each server have its own bot identity, that's a bigger change — see
 `docs/multi-client-tenants.md`.
+
+## Updating and rolling back
+
+Releases are tagged (`v2026.08.31`-style) and each publishes a matching image tag;
+`CHANGELOG.md` says what changed. On the prebuilt-image stack, updating is a re-pull:
+
+```
+docker compose -f deploy/compose.nas.yaml pull && docker compose -f deploy/compose.nas.yaml up -d
+```
+
+(Portainer: "Update the stack" with **Re-pull image** ticked.) The container is given up to
+330 s to **finish the song it's playing** before it exits — a slow stop during an update is
+the graceful drain working, not a hang. To roll back, set `MERCURYRADIO_TAG` to an earlier
+release tag and update again; unset it to return to `latest`.
 
 ## Troubleshooting
 

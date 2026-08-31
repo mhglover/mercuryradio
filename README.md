@@ -1,5 +1,7 @@
 # mercuryradio
 
+[![ci](https://github.com/mhglover/mercuryradio/actions/workflows/ci.yml/badge.svg)](https://github.com/mhglover/mercuryradio/actions/workflows/ci.yml)
+
 A small private Discord server where a few friends hear the **same stream at the same time**,
 rate the song playing now on a live colored sidebar, and the next block is chosen from the
 ratings of whoever is in the voice channel. The "room" half of the shasradio/mercury radio
@@ -74,8 +76,10 @@ listeners away and the score doesn't exist.**
 ## Status
 
 Streaming, the rating card, the selection engine, requests, listener uploads, multi-tenant (one
-process serves many servers), and Plex/shasradio rating import are all in and running privately.
-Someday: package for open source.
+process serves many servers), and Plex/shasradio rating import are all in and running daily.
+The repo is public: CI runs the test suite on every push, releases are tagged with notes in
+`CHANGELOG.md`, and every release publishes a ready-to-run multi-arch image to
+`ghcr.io/mhglover/mercuryradio` — see [SETUP.md](SETUP.md) to host your own.
 
 ## Config
 
@@ -135,13 +139,18 @@ With `VOICE_CHANNEL_ID` set the bot auto-joins and starts; otherwise `/join` fro
 ## Run in Docker
 
 No published ports — it only needs Discord egress, a read-only mount of your library, and a
-writable `/data` dir for the SQLite DB. Set the values in `.env`, then:
+writable `/data` dir for the SQLite DB.
+
+**Prebuilt image** (published by CI, multi-arch, anonymous pull): `deploy/compose.nas.yaml`
+pulls `ghcr.io/mhglover/mercuryradio:latest` — deploy it with compose or as a Portainer stack
+with the env values set in the stack's Environment. Pin `MERCURYRADIO_TAG` to a release tag to
+hold or roll back a version.
+
+**Or build from the checkout** — set the values in `.env`, then:
 
 ```
 docker compose up -d --build
 ```
 
-Or point Portainer at this repo as a stack (set `DISCORD_TOKEN`, `GUILD_ID`, `VOICE_CHANNEL_ID`,
-`MUSIC_DIR`, `DATA_DIR` in the stack environment; `deploy/compose.nas.yaml` is the image-based
-variant). The image bundles ffmpeg + libopus; `MUSIC_DIR` mounts read-only at `/music`, `DATA_DIR`
-at `/data`.
+The image bundles ffmpeg + libopus and installs Python dependencies from `uv.lock` (one source
+of truth with the repo); `MUSIC_DIR` mounts read-only at `/music`, `DATA_DIR` at `/data`.
