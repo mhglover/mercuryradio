@@ -868,7 +868,7 @@ async def help_cmd(interaction: discord.Interaction) -> None:
         value=f"Click a button under the **now-playing card**:\n{scale}\n"
               "Your pick shows in your color on the card's sidebar and feeds what plays next. "
               "The scale punishes the veto — a Hate counts far more than a Love. "
-              "You can also `/rate` any track by name, even off-air.",
+              "You can also `/rate` the current song without touching the card, or any track by name, even off-air.",
         inline=False,
     )
     embed.add_field(
@@ -1001,14 +1001,22 @@ async def _request_autocomplete(interaction: discord.Interaction, current: str):
 _RATING_CHOICES = [app_commands.Choice(name=label, value=value) for label, value, _sq, _st in RATINGS]
 
 
-@tree.command(name="rate", description="Set or change your rating for any track.")
-@app_commands.describe(track="Start typing an artist or title, then pick from the list", rating="Your rating")
+@tree.command(name="rate", description="Rate the song playing now, or any track by name.")
+@app_commands.describe(rating="Your rating", track="Optional — leave blank to rate the song playing now")
 @app_commands.choices(rating=_RATING_CHOICES)
-async def rate(interaction: discord.Interaction, track: str, rating: app_commands.Choice[int]) -> None:
-    row = _resolve_track(track)
-    if row is None:
-        await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
-        return
+async def rate(interaction: discord.Interaction, rating: app_commands.Choice[int], track: str | None = None) -> None:
+    if track:
+        row = _resolve_track(track)
+        if row is None:
+            await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
+            return
+    else:  # no track named -> the song playing in this server right now
+        radio = _radio(interaction.guild_id) if interaction.guild_id else None
+        row = radio.current_row if radio else None
+        if row is None:
+            await interaction.response.send_message(
+                "Nothing is playing here — name a track to rate one by hand.", ephemeral=True)
+            return
     db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
     db.set_rating(conn, str(interaction.user.id), row["id"], rating.value)
     if interaction.guild_id:

@@ -4,6 +4,8 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **`/rate` now defaults to the song playing.** Leave the track blank and your rating lands
+  on the current song — no card required. Naming a track still works exactly as before.
 - **`/bug` — file a bug report from inside Discord.** It lands in the database stamped with
   the time, the reporter, and the track playing at that moment, and prints a timestamped
   `[bug]` marker into the server log so a report made during a glitch lines up with the
