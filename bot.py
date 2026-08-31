@@ -217,6 +217,8 @@ class GuildRadio:
         self.card_has_cover = False  # whether the card message carries a cover attachment
         self.msgs_since_card = 0   # chat since the card last moved — counted from gateway events (no history perm)
         self.track_started = None  # time.monotonic() when the current track began (seek-adjusted), for the time bar
+        self.promo_track_id = None # station-ID track for this guild (guilds.promo_track_id), loaded by _radio
+        self.promo_pending = False # play the promo before the first track of this wake
         self.card_lock = asyncio.Lock()  # serialize card ops so a track change can't leak a card
         self.next_row = None       # prefetched next track (picked ~PREFETCH_LEAD_S before the end)
         self.next_source = None    # its pre-rolled _BufferedOpus, ready to play seamlessly
@@ -239,6 +241,7 @@ def _radio(guild_id) -> GuildRadio | None:
     if row is None:
         return None
     radios[gid] = GuildRadio(gid, row["voice_channel_id"], row["nowplaying_channel_id"])
+    radios[gid].promo_track_id = row["promo_track_id"]
     return radios[gid]
 
 
@@ -377,6 +380,25 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
     if radio.prefetch_handle is not None:
         radio.prefetch_handle.cancel()
         radio.prefetch_handle = None
+    if radio.promo_pending:
+        # Station ID first (Anarkey's ask): play the configured clip through the same
+        # buffered-source path, then _after re-enters _advance for the real first track
+        # (which therefore starts fresh — the wake seek is spent on the promo cycle).
+        # Not ratable, no card, no play history; a vanished track skips silently into music.
+        radio.promo_pending = False
+        prow = db.promo_row(conn, radio.guild_id)
+        if prow is not None:
+            try:
+                psource = await _make_source(dict(prow), 0)
+            except Exception as e:
+                print(f"promo failed to build, skipping to music: {e}")
+            else:
+                _discard_prefetch(radio)
+                radio.current_row = None
+                radio.current_track = "station ID"
+                radio.track_started = None
+                vc.play(psource, after=lambda err: _after(radio, vc, err, prow["path"]))
+                return
     if seek == 0 and radio.next_source is not None:
         row, source, picker = radio.next_row, radio.next_source, radio.next_picker
         radio.next_row = radio.next_source = radio.next_picker = None
@@ -415,6 +437,7 @@ def _sync_playback(radio: GuildRadio, vc: discord.VoiceClient) -> None:
         return
     if _listeners(vc.channel) and not radio.active:
         radio.active = True
+        radio.promo_pending = radio.promo_track_id is not None  # station ID leads this wake
         if _loop and not vc.is_playing():
             _loop.create_task(_advance(radio, vc, seek=WAKE_SEEK_SECONDS))
 
@@ -993,6 +1016,41 @@ async def setup(interaction: discord.Interaction, voice: discord.VoiceChannel,
     await _serve_guild(radio)
 
 
+@tree.command(name="promo", description="Set the station-ID clip played when the radio wakes (admin).")
+@app_commands.describe(track="A library track to play on wake — /add or /youtube it in first",
+                       clear="Remove the promo")
+async def promo(interaction: discord.Interaction, track: str | None = None, clear: bool = False) -> None:
+    if interaction.guild_id is None:
+        await interaction.response.send_message("Run this in a server.", ephemeral=True)
+        return
+    if not interaction.user.guild_permissions.manage_guild:
+        await interaction.response.send_message("You need Manage Server to set the promo.", ephemeral=True)
+        return
+    radio = _radio(interaction.guild_id)
+    if radio is None:
+        await interaction.response.send_message("Run /setup first.", ephemeral=True)
+        return
+    if clear:
+        db.set_guild_promo(conn, interaction.guild_id, None)
+        radio.promo_track_id = None  # live update — no radios.pop, playback state survives
+        await interaction.response.send_message("Promo cleared — wakes go straight to music.", ephemeral=True)
+        return
+    if track:
+        row = _resolve_track(track)
+        if row is None:
+            await interaction.response.send_message(f"No track matches “{track}”.", ephemeral=True)
+            return
+        db.set_guild_promo(conn, interaction.guild_id, row["id"])
+        radio.promo_track_id = row["id"]
+        await interaction.response.send_message(
+            f"📻 Station ID set: **{row['artist']} – {row['title']}** plays when the radio wakes.", ephemeral=True)
+        return
+    current = db.promo_row(conn, interaction.guild_id)
+    msg = (f"Current station ID: **{current['artist']} – {current['title']}**."
+           if current else "No station ID set — `/promo track:` to pick one.")
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
 @tree.command(name="perms", description="Control who can add music on this server (admin).")
 @app_commands.describe(
     adding="Turn /add + /youtube on or off here — off hides them from the command list entirely",
@@ -1129,6 +1187,7 @@ async def rate(interaction: discord.Interaction, rating: app_commands.Choice[int
 
 # Same free-text -> track-id autocomplete as /request.
 rate.autocomplete("track")(_request_autocomplete)
+promo.autocomplete("track")(_request_autocomplete)
 
 
 @tree.command(name="retag", description="Fix a track's artist/title (e.g. a YouTube add tagged with the channel name).")

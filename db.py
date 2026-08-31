@@ -135,6 +135,10 @@ def _migrate(conn) -> None:
     # add_enabled controls whether /add + /youtube are registered (visible) per guild.
     # New servers default off (hidden); grandfather every server that predates this column
     # to on, so existing rooms keep the adding they already had.
+    if "promo_track_id" not in gcols:
+        # Station-ID promo: a library track played once when the VC wakes (2026-08-31).
+        conn.execute("ALTER TABLE guilds ADD COLUMN promo_track_id INTEGER")
+        conn.commit()
     if "add_enabled" not in gcols:
         conn.execute("ALTER TABLE guilds ADD COLUMN add_enabled INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE guilds SET add_enabled = 1")
@@ -209,6 +213,22 @@ def music_count(conn) -> int:
     return conn.execute(
         f"SELECT COUNT(*) AS n FROM tracks WHERE {_NOT_AUDIOBOOK}"
     ).fetchone()["n"]
+
+
+def set_guild_promo(conn, guild_id, track_id: int | None) -> None:
+    conn.execute("UPDATE guilds SET promo_track_id = ? WHERE guild_id = ?",
+                 (track_id, str(guild_id)))
+    conn.commit()
+
+
+def promo_row(conn, guild_id) -> sqlite3.Row | None:
+    """The configured station-ID track for a guild as a playable row, or None —
+    None too if the track was deleted out from under the config."""
+    return conn.execute(
+        "SELECT t.id, t.path, t.artist, t.title, t.duration FROM guilds g "
+        "JOIN tracks t ON t.id = g.promo_track_id WHERE g.guild_id = ?",
+        (str(guild_id),),
+    ).fetchone()
 
 
 def get_option(conn, name: str) -> str | None:

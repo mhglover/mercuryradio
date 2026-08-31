@@ -73,6 +73,8 @@ listeners away and the score doesn't exist.**
 - `/recent` — show the last few played tracks and rate one you didn't click while it played.
 - `/bug <text>` — file a bug report straight into the database, stamped with the time, you, and
   the track playing right now.
+- `/promo <track>` — **(admin)** set a station-ID clip played once when the radio wakes;
+  `/promo` shows it, `/promo clear:True` removes it.
 - `/setup` — **(admin)** register this server's voice + card channel — see multi-tenant below.
 - `/leave` — stop this server's radio.
 

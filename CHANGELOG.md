@@ -4,6 +4,10 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **Station-ID promo on wake.** `/promo track:` (admin) picks a library track — `/add` or
+  `/youtube` your clip in first — and the radio plays it once when it wakes, before the
+  first song. `/promo` shows the current one, `/promo clear:True` removes it. Per server;
+  the clip isn't ratable and doesn't hit play history.
 - **Request fairness: one pending request each.** A new `/request` replaces your pending
   one and goes to the back of the queue — changing your mind costs your spot, and nobody
   can stack the queue. The reply says what got swapped.
