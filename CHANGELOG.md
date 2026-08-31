@@ -4,6 +4,11 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **`/update` — tell the bot to restart on the newest release** (bot owner only). It
+  finishes the current song, pulls the new image, and comes back announcing its own
+  release notes. Needs the `watchtower` sidecar from `deploy/compose.nas.yaml` and a
+  `WATCHTOWER_TOKEN` in the stack env; unconfigured, the command says how to set it up.
+
 - **Station-ID promo on wake.** `/promo track:` (admin) picks a library track — `/add` or
   `/youtube` your clip in first — and the radio plays it once when it wakes, before the
   first song. `/promo` shows the current one, `/promo clear:True` removes it. Per server;

@@ -21,6 +21,7 @@ import signal
 import threading
 import time
 
+import aiohttp  # ships with discord.py
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
@@ -1014,6 +1015,44 @@ async def setup(interaction: discord.Interaction, voice: discord.VoiceChannel,
         ephemeral=True,
     )
     await _serve_guild(radio)
+
+
+async def _is_bot_owner(user) -> bool:
+    app = await client.application_info()
+    if app.team:
+        return any(m.id == user.id for m in app.team.members)
+    return user.id == app.owner.id
+
+
+@tree.command(name="update", description="Restart the bot on the newest release (bot owner).")
+async def update(interaction: discord.Interaction) -> None:
+    if not await _is_bot_owner(interaction.user):
+        await interaction.response.send_message("Only the bot owner can update the bot.", ephemeral=True)
+        return
+    url, token = os.environ.get("WATCHTOWER_URL"), os.environ.get("WATCHTOWER_TOKEN")
+    if not url or not token:
+        await interaction.response.send_message(
+            "Self-update isn't configured — set WATCHTOWER_URL and WATCHTOWER_TOKEN in the stack "
+            "(see deploy/compose.nas.yaml).", ephemeral=True)
+        return
+    # Reply BEFORE asking watchtower: if there IS a new image, watchtower stops this very
+    # process (after the drain), so no code after the update reliably runs. The release-notes
+    # announce on the new boot is the visible confirmation.
+    await interaction.response.send_message(
+        "📦 Checking for a new release. If there is one I'll finish the current song, restart, "
+        "and post the release notes when I'm back.", ephemeral=True)
+
+    async def _kick() -> None:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers={"Authorization": f"Bearer {token}"},
+                                        timeout=aiohttp.ClientTimeout(total=900)) as r:
+                    print(f"[update] watchtower answered {r.status}: {(await r.text())[:200]!r} "
+                          "(an answer means NO new image — a real update kills this process first)")
+        except Exception as e:
+            print(f"[update] watchtower call failed: {e}")
+
+    asyncio.get_running_loop().create_task(_kick())
 
 
 @tree.command(name="promo", description="Set the station-ID clip played when the radio wakes (admin).")

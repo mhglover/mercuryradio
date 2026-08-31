@@ -148,7 +148,9 @@ Releases are tagged (`v2026.08.31`-style) and each publishes a matching image ta
 docker compose -f deploy/compose.nas.yaml pull && docker compose -f deploy/compose.nas.yaml up -d
 ```
 
-(Portainer: "Update the stack" with **Re-pull image** ticked.) The container is given up to
+(Portainer: "Update the stack" with **Re-pull image** ticked. Or skip the UI entirely:
+with the `watchtower` sidecar from `deploy/compose.nas.yaml` and `WATCHTOWER_TOKEN` set,
+the bot owner can just say **`/update`** in Discord.) The container is given up to
 330 s to **finish the song it's playing** before it exits — a slow stop during an update is
 the graceful drain working, not a hang. To roll back, set `MERCURYRADIO_TAG` to an earlier
 release tag and update again; unset it to return to `latest`.

@@ -73,6 +73,9 @@ listeners away and the score doesn't exist.**
 - `/recent` — show the last few played tracks and rate one you didn't click while it played.
 - `/bug <text>` — file a bug report straight into the database, stamped with the time, you, and
   the track playing right now.
+- `/update` — **(bot owner)** restart onto the newest published release: finishes the song,
+  pulls, comes back and posts its release notes. Needs the watchtower sidecar — see
+  `deploy/compose.nas.yaml`.
 - `/promo <track>` — **(admin)** set a station-ID clip played once when the radio wakes;
   `/promo` shows it, `/promo clear:True` removes it.
 - `/setup` — **(admin)** register this server's voice + card channel — see multi-tenant below.

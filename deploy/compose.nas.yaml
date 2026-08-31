@@ -28,9 +28,30 @@ services:
       # a media server pointed at the library sees them). The source library stays :ro.
       ADDED_DIR: /music/_Added
       PYTHONUNBUFFERED: "1"  # flush print() to the container log immediately
+      # /update (bot-owner-only) asks watchtower below to pull + recreate this
+      # container. Leave WATCHTOWER_TOKEN unset to disable the command.
+      WATCHTOWER_URL: http://watchtower:8080/v1/update
+      WATCHTOWER_TOKEN: ${WATCHTOWER_TOKEN:-}
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
     volumes:
       - ${MUSIC_DIR:?set MUSIC_DIR to your library host path}:/music:ro
       - ${DATA_DIR:?set DATA_DIR to a host dir for the SQLite DB}:/data
       # Writable _Added subfolder nested inside the ro library mount (host path derived
       # from MUSIC_DIR). This is what makes ADDED_DIR above writable.
       - ${MUSIC_DIR}/_Added:/music/_Added
+
+  # On-demand self-update: /update in Discord POSTs to this API; watchtower pulls the
+  # image and recreates only labeled containers, and ONLY when the image changed.
+  # No schedule — API-only. WATCHTOWER_TIMEOUT must cover the bot's stop_grace_period
+  # or an update would SIGKILL mid-song instead of letting the drain finish.
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: mercuryradio-watchtower
+    restart: unless-stopped
+    command: --http-api-update --label-enable --cleanup
+    environment:
+      WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:?set WATCHTOWER_TOKEN to enable /update}
+      WATCHTOWER_TIMEOUT: 340s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
