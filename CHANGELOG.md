@@ -10,6 +10,11 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
   made the rating look like it landed on the wrong track. The card is now rebuilt from the
   actual now-playing state on every refresh. (Ratings themselves always went to the current
   track; only the display lied.)
+- **CI + published images + release tags.** Every push runs the test suite on GitHub
+  Actions; pushes to main publish a multi-arch image to
+  `ghcr.io/mhglover/mercuryradio:latest`, and `v*` release tags publish a matching
+  image tag (roll back by pinning an older tag in the stack). The Dockerfile now
+  installs from `uv.lock`, so the image and a local checkout can't drift.
 
 ## 2026-08-30
 

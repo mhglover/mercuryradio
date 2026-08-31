@@ -79,6 +79,10 @@ your server with `/setup` in Step 6 instead.
 docker compose up -d --build
 ```
 
+(Or skip the build: CI publishes a ready-made multi-arch image on every release —
+`ghcr.io/mhglover/mercuryradio:latest` — and `deploy/compose.nas.yaml` shows a
+pull-based stack that uses it. Handy on a NAS or anywhere you'd rather not build.)
+
 Watch the logs the first time:
 
 ```

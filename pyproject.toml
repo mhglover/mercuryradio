@@ -7,4 +7,5 @@ dependencies = [
     "discord.py[voice]>=2.4",
     "python-dotenv>=1.0",
     "mutagen>=1.47",
+    "yt-dlp>=2025.1.1",
 ]

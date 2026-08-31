@@ -1,14 +1,14 @@
-# NAS / Portainer deploy — uses a prebuilt image loaded onto the host, not a build context.
-# Build locally and ship it registry-free:
-#   docker build -t mercuryradio:latest .
-#   docker save mercuryradio:latest | ssh nas 'sudo docker load'
-# Then deploy this as a Portainer stack; set DISCORD_TOKEN, GUILD_ID and MUSIC_DIR (the host path
-# to your library) in the stack's Environment — never in this file. No published ports: Discord
-# egress plus a read-only library mount.
+# NAS / Portainer deploy — pulls the image CI publishes to GHCR on every push to main
+# (and on v* tags). Deploy = "re-pull and redeploy" the stack in Portainer, nothing to
+# build or ship by hand. Roll back by pinning MERCURYRADIO_TAG to an earlier version
+# tag (each release is tagged; see CHANGELOG.md).
+# Set DISCORD_TOKEN, GUILD_ID and MUSIC_DIR (the host path to your library) in the
+# stack's Environment — never in this file. No published ports: Discord egress plus a
+# read-only library mount.
 services:
   mercuryradio:
-    image: mercuryradio:latest
-    pull_policy: never
+    image: ghcr.io/mhglover/mercuryradio:${MERCURYRADIO_TAG:-latest}
+    pull_policy: always
     container_name: mercuryradio
     restart: unless-stopped
     # Finish the current song before exiting on redeploy (DRAIN_TIMEOUT in bot.py);
