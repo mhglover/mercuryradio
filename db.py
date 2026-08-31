@@ -347,7 +347,7 @@ def list_guilds(conn) -> list[sqlite3.Row]:
 
 def get_guild(conn, guild_id) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT guild_id, voice_channel_id, nowplaying_channel_id, music_dir "
+        "SELECT guild_id, voice_channel_id, nowplaying_channel_id, music_dir, promo_track_id "
         "FROM guilds WHERE guild_id = ? AND enabled = 1",
         (str(guild_id),),
     ).fetchone()
