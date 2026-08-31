@@ -216,6 +216,7 @@ class GuildRadio:
         self.np_message = None     # the live now-playing card (ONE per guild, edited in place)
         self.card_has_cover = False  # whether the card message carries a cover attachment
         self.msgs_since_card = 0   # chat since the card last moved — counted from gateway events (no history perm)
+        self.track_started = None  # time.monotonic() when the current track began (seek-adjusted), for the time bar
         self.card_lock = asyncio.Lock()  # serialize card ops so a track change can't leak a card
         self.next_row = None       # prefetched next track (picked ~PREFETCH_LEAD_S before the end)
         self.next_source = None    # its pre-rolled _BufferedOpus, ready to play seamlessly
@@ -392,6 +393,7 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
             return
     radio.current_row = row
     radio.current_track = f"{row['artist']} – {row['title']}"
+    radio.track_started = time.monotonic() - (seek or 0)
     db.record_play(conn, row["id"], reason=picker)
     vc.play(source, after=lambda err: _after(radio, vc, err, row["path"]))
     await _post_nowplaying(radio, vc.channel, row)
@@ -435,8 +437,30 @@ def _np_channel(radio: GuildRadio, voice_channel):
     return voice_channel  # voice channels are Messageable (text-in-voice) in discord.py 2.x
 
 
+def _mmss(seconds: float) -> str:
+    m, s = divmod(int(seconds), 60)
+    return f"{m}:{s:02d}"
+
+
+def _time_bar(radio: GuildRadio, row: dict) -> str | None:
+    """A STATIC progress bar as of render time — the card only redraws on ratings and
+    track changes, so this updates for free then. ⛔ Never a ticking edit loop: a
+    per-few-seconds edit gets rate-limited (the note's own warning). No duration on the
+    row (old scans) or no start stamp -> no bar, gracefully."""
+    dur = row.get("duration")
+    if not dur or radio.track_started is None:
+        return None
+    elapsed = min(max(time.monotonic() - radio.track_started, 0.0), dur)
+    filled = round(10 * elapsed / dur)
+    return "▰" * filled + "▱" * (10 - filled) + f" {_mmss(elapsed)} / {_mmss(dur)}"
+
+
 def _build_embed(radio: GuildRadio, row: dict, voice_channel, has_cover: bool) -> discord.Embed:
-    embed = discord.Embed(title=f"{row['artist']} – {row['title']}", description=row.get("album") or "")
+    desc = row.get("album") or ""
+    bar = _time_bar(radio, row)
+    if bar:
+        desc = f"{desc}\n{bar}" if desc else bar
+    embed = discord.Embed(title=f"{row['artist']} – {row['title']}", description=desc)
     embed.add_field(name="Ratings", value=_sidebar(radio, voice_channel, row["id"]), inline=False)
     if has_cover:
         embed.set_thumbnail(url="attachment://cover.png")

@@ -4,6 +4,10 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **A time bar on the card.** Under the album: how far into the song the room is and how
+  long it runs, as of the card's last redraw — it refreshes whenever someone rates or the
+  track changes. (Deliberately not live-ticking; Discord rate-limits per-second edits.)
+  Tracks scanned before durations were recorded just don't show one.
 - **The card resurfaces when it gets buried.** If five or more chat messages have landed
   since the now-playing card last moved, the next track change reposts it at the bottom of
   the channel instead of editing it in place — no more scrolling back up to find the
