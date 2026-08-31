@@ -2,6 +2,15 @@
 
 Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
+## 2026-08-31
+
+- **Fixed the card reverting to an earlier track when someone rates.** The rating refresh
+  rebuilt the card from a snapshot of the message taken when the card was first posted, so
+  after a track change (or a skip) any rating snapped the card back to the old song — and
+  made the rating look like it landed on the wrong track. The card is now rebuilt from the
+  actual now-playing state on every refresh. (Ratings themselves always went to the current
+  track; only the display lied.)
+
 ## 2026-08-30
 
 - **Fixed the speed-up/slow-down artifact.** Playback now reads ahead into a buffer and

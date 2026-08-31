@@ -212,6 +212,7 @@ class GuildRadio:
         self.current_row = None    # the track playing now
         self.current_track = None  # "artist – title" for status
         self.np_message = None     # the live now-playing card (ONE per guild, edited in place)
+        self.card_has_cover = False  # whether the card message carries a cover attachment
         self.card_lock = asyncio.Lock()  # serialize card ops so a track change can't leak a card
         self.next_row = None       # prefetched next track (picked ~PREFETCH_LEAD_S before the end)
         self.next_source = None    # its pre-rolled _BufferedOpus, ready to play seamlessly
@@ -537,10 +538,13 @@ async def _refresh_sidebar(radio: GuildRadio) -> None:
         guild = radio.np_message.guild
         vc = guild.voice_client if guild else None
         voice_channel = vc.channel if vc else radio.np_message.channel
-        embed = radio.np_message.embeds[0]
-        embed.set_field_at(0, name="Ratings", value=_sidebar(radio, voice_channel, radio.current_row["id"]), inline=False)
+        # Rebuild the embed from current_row, NEVER from radio.np_message.embeds — that object
+        # is a snapshot from whenever the reference was captured (edit() returns the updated
+        # message; a discarded return leaves the snapshot stale), and rebuilding a stale
+        # snapshot is what made the card revert to an old track on every rating (8/31 bug).
+        embed = _build_embed(radio, radio.current_row, voice_channel, has_cover=radio.card_has_cover)
         try:
-            await radio.np_message.edit(embed=embed)
+            radio.np_message = await radio.np_message.edit(embed=embed)
         except discord.HTTPException:
             pass
 
@@ -560,11 +564,12 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
         if msg is not None and msg.channel.id != channel.id:
             await _delete_card(radio)  # card channel changed (e.g. /setup) -> retire it
             msg = None
+        radio.card_has_cover = bool(cover)
         if msg is not None:
             try:
                 file = discord.File(io.BytesIO(cover), filename="cover.png") if cover else None
                 embed = _build_embed(radio, row, voice_channel, has_cover=bool(cover))
-                await msg.edit(embed=embed, view=RatingView(), attachments=[file] if file else [])
+                radio.np_message = await msg.edit(embed=embed, view=RatingView(), attachments=[file] if file else [])
             except discord.NotFound:
                 radio.np_message = None  # someone deleted the card -> repost below
             except discord.HTTPException as e:
