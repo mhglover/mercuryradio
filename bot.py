@@ -1190,6 +1190,21 @@ async def youtube(interaction: discord.Interaction, url: str,
         f"🎵 **{interaction.user.display_name}** added **{lib_artist} – {lib_title}** from YouTube — /request it.")
 
 
+@tree.command(name="bug", description="File a bug report — lands straight in the database.")
+@app_commands.describe(text="What happened. The time and the current track are recorded for you.")
+async def bug(interaction: discord.Interaction, text: str) -> None:
+    radio = _radio(interaction.guild_id) if interaction.guild_id else None
+    row = radio.current_row if radio else None
+    db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
+    bug_id = db.add_bug(conn, str(interaction.user.id), str(interaction.guild_id) if interaction.guild_id else None,
+                        text, row["id"] if row else None)
+    now = f" — now playing: {row['artist']} – {row['title']}" if row else ""
+    # Also a timestamped marker in the container log, next to the [pace] lines — a /bug
+    # during a glitch is exactly the human-flagged marker the pacing work asked for.
+    print(f"[bug] #{bug_id} {interaction.user.display_name}: {text}{now}")
+    await interaction.response.send_message(f"🐛 Bug #{bug_id} filed{now}. Thank you!", ephemeral=True)
+
+
 @tree.command(name="recent", description="Show recently played tracks and rate any you missed.")
 async def recent(interaction: discord.Interaction) -> None:
     plays = db.recent_plays(conn, 10)

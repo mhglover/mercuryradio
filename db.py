@@ -77,6 +77,15 @@ CREATE TABLE IF NOT EXISTS guilds (
 );
 -- Per-guild presence: a rating touches (user, guild) so a recent rating counts
 -- the user present in THAT server only (scoped, unlike the shared ratings).
+CREATE TABLE IF NOT EXISTS bugs (
+    id          INTEGER PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    guild_id    TEXT,
+    track_id    INTEGER,
+    reported_at TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    FOREIGN KEY (track_id) REFERENCES tracks(id)
+);
 CREATE TABLE IF NOT EXISTS presence (
     user_id  TEXT NOT NULL,
     guild_id TEXT NOT NULL,
@@ -200,6 +209,17 @@ def music_count(conn) -> int:
     return conn.execute(
         f"SELECT COUNT(*) AS n FROM tracks WHERE {_NOT_AUDIOBOOK}"
     ).fetchone()["n"]
+
+
+def add_bug(conn, user_id: str, guild_id: str | None, text: str, track_id: int | None = None) -> int:
+    """File a /bug report: timestamped, user-attributed, with the now-playing track
+    when there is one (most reports are about the song on the card right now)."""
+    cur = conn.execute(
+        "INSERT INTO bugs (user_id, guild_id, track_id, reported_at, text) VALUES (?, ?, ?, ?, ?)",
+        (user_id, guild_id, track_id, _now(), text),
+    )
+    conn.commit()
+    return cur.lastrowid
 
 
 def record_play(conn, track_id: int, reason: str | None = None, user_id: str | None = None) -> None:

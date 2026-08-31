@@ -70,6 +70,8 @@ listeners away and the score doesn't exist.**
   at `MAX_ADD_MINUTES` (default 20), lands in `ADDED_DIR` like `/add`. The "Added" lands publicly in
   the channel; the interim and any errors are shown only to you.
 - `/recent` — show the last few played tracks and rate one you didn't click while it played.
+- `/bug <text>` — file a bug report straight into the database, stamped with the time, you, and
+  the track playing right now.
 - `/setup` — **(admin)** register this server's voice + card channel — see multi-tenant below.
 - `/leave` — stop this server's radio.
 

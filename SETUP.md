@@ -119,6 +119,8 @@ leaving when the channel empties.
 - **`/add <file>`** — upload an audio file into the library.
 - **`/youtube <url>`** — pull audio from a link into the library.
 - **`/recent`**, **`/rate`**, **`/myratings`** — rate tracks you missed / by name / review yours.
+- **`/bug <what happened>`** — file a bug report; the host sees it with the time and the track
+  that was playing.
 - **`/perms`** (admin) — restrict who can `/add` and `/youtube`, or hide those commands until
   you turn them on. New servers start with adding **off**.
 - **`/help`** — the in-Discord version of all this.

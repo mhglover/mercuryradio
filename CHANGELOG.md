@@ -4,6 +4,11 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **`/bug` — file a bug report from inside Discord.** It lands in the database stamped with
+  the time, the reporter, and the track playing at that moment, and prints a timestamped
+  `[bug]` marker into the server log so a report made during a glitch lines up with the
+  pacing instrumentation. The ack is private to you.
+
 - **Fixed the card reverting to an earlier track when someone rates.** The rating refresh
   rebuilt the card from a snapshot of the message taken when the card was first posted, so
   after a track change (or a skip) any rating snapped the card back to the old song — and
