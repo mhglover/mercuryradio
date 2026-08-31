@@ -183,6 +183,7 @@ PRESENCE_WINDOW_MIN = 30
 # On wake (empty VC -> someone joins), start the first song this many seconds in.
 WAKE_SEEK_SECONDS = 30
 TOPIC_EVERY = 5  # refresh the channel topic once per this many tracks
+CARD_REPOST_AFTER = 5  # chat messages since the card before a track change REPOSTS it at the bottom
 
 # (label, rating value, colored square for the sidebar, button style)
 RATINGS = [
@@ -214,6 +215,7 @@ class GuildRadio:
         self.current_track = None  # "artist – title" for status
         self.np_message = None     # the live now-playing card (ONE per guild, edited in place)
         self.card_has_cover = False  # whether the card message carries a cover attachment
+        self.msgs_since_card = 0   # chat since the card last moved — counted from gateway events (no history perm)
         self.card_lock = asyncio.Lock()  # serialize card ops so a track change can't leak a card
         self.next_row = None       # prefetched next track (picked ~PREFETCH_LEAD_S before the end)
         self.next_source = None    # its pre-rolled _BufferedOpus, ready to play seamlessly
@@ -565,6 +567,13 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
         if msg is not None and msg.channel.id != channel.id:
             await _delete_card(radio)  # card channel changed (e.g. /setup) -> retire it
             msg = None
+        if msg is not None and radio.msgs_since_card >= CARD_REPOST_AFTER:
+            # The card is buried under chat — repost at the bottom instead of editing in
+            # place, so it's visible when the song changes (the old ratebox pop-out want).
+            # Bounded by the counter, so a quiet channel keeps the edit-in-place behavior
+            # that fixed sticky cards; a repost only happens when people were talking.
+            await _delete_card(radio)
+            msg = None
         radio.card_has_cover = bool(cover)
         if msg is not None:
             try:
@@ -585,6 +594,7 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
                 radio.np_message = await channel.send(**send_kwargs, silent=True)
             except discord.HTTPException as e:
                 print(f"could not post now-playing card: {e}")
+        radio.msgs_since_card = 0  # the card just moved (edited or reposted) — restart the burial count
         try:  # bot status is global (one per bot); with N guilds it shows the latest track
             await client.change_presence(
                 activity=discord.Activity(type=discord.ActivityType.listening, name=f"{row['artist']} – {row['title']}")
@@ -814,6 +824,23 @@ async def on_ready() -> None:
 @client.event
 async def on_guild_join(guild) -> None:
     await _sync_commands_to(guild)  # so /setup is available immediately
+
+
+def _bump_card_burial(message) -> None:
+    """Count chat landing in a guild's card channel since its card last moved. The invite
+    permission set has no Read Message History, so channel.history() would 403 — the
+    gateway already delivers every message, so the bot counts for itself. Our own
+    messages (the card, release notes) don't count."""
+    if client.user is not None and message.author.id == client.user.id:
+        return
+    radio = radios.get(message.guild.id) if message.guild else None
+    if radio and radio.np_message is not None and message.channel.id == radio.np_message.channel.id:
+        radio.msgs_since_card += 1
+
+
+@client.event
+async def on_message(message) -> None:
+    _bump_card_burial(message)
 
 
 @client.event

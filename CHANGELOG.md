@@ -4,6 +4,10 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **The card resurfaces when it gets buried.** If five or more chat messages have landed
+  since the now-playing card last moved, the next track change reposts it at the bottom of
+  the channel instead of editing it in place — no more scrolling back up to find the
+  buttons after a conversation. Quiet channels keep the edit-in-place behavior.
 - **Release notes on update.** When the bot boots on a new version, it posts that
   release's notes (this file's newest section) to each server's card channel — silently,
   once per release. So the room finds out what changed without anyone saying so.
