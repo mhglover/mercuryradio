@@ -211,6 +211,17 @@ def music_count(conn) -> int:
     ).fetchone()["n"]
 
 
+def get_option(conn, name: str) -> str | None:
+    row = conn.execute("SELECT value FROM options WHERE name = ?", (name,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_option(conn, name: str, value: str) -> None:
+    conn.execute("INSERT INTO options (name, value) VALUES (?, ?) "
+                 "ON CONFLICT(name) DO UPDATE SET value = excluded.value", (name, value))
+    conn.commit()
+
+
 def add_bug(conn, user_id: str, guild_id: str | None, text: str, track_id: int | None = None) -> int:
     """File a /bug report: timestamped, user-attributed, with the now-playing track
     when there is one (most reports are about the song on the card right now)."""

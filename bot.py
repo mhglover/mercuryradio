@@ -16,6 +16,7 @@ import asyncio
 import collections
 import io
 import os
+import re
 import signal
 import threading
 import time
@@ -604,6 +605,43 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
                 print(f"could not set channel topic: {e}")
 
 
+def _release_notes() -> tuple[str | None, str | None]:
+    """The newest CHANGELOG section: (release name, its markdown body). CHANGELOG.md
+    ships in the image and IS the release notes — one source, no second file."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return None, None
+    m = re.search(r"^## (.+?)\s*$", text, re.M)
+    if not m:
+        return None, None
+    nxt = text.find("\n## ", m.end())
+    body = text[m.end():nxt if nxt != -1 else len(text)].strip()
+    return m.group(1).strip(), body[:3900]  # embed description cap is 4096
+
+
+async def _announce_release() -> None:
+    """On boot, if this build's newest CHANGELOG section hasn't been announced yet,
+    post it (silently) to every configured card channel, once."""
+    version, notes = _release_notes()
+    if not version or not notes or db.get_option(conn, "announced_release") == version:
+        return
+    for row in db.list_guilds(conn):
+        chan_id = row["nowplaying_channel_id"]
+        channel = client.get_channel(int(chan_id)) if chan_id else None
+        if channel is None:
+            continue  # no card channel configured -> that server gets no announce
+        embed = discord.Embed(title=f"Mercury Radio updated — {version}", description=notes)
+        try:
+            await channel.send(embed=embed, silent=True)
+        except discord.HTTPException as e:
+            print(f"release-notes post failed for guild {row['guild_id']}: {e}")
+    # Mark announced even if a post failed — a broken channel must not re-announce
+    # to every OTHER server on each reboot; the failure is in the log above.
+    db.set_option(conn, "announced_release", version)
+
+
 async def _clear_nowplaying(radio: GuildRadio, clear_status: bool = True) -> None:
     async with radio.card_lock:
         await _delete_card(radio)
@@ -770,6 +808,7 @@ async def on_ready() -> None:
         radio = _radio(row["guild_id"])
         if radio:
             await _serve_guild(radio)
+    await _announce_release()  # idempotent: keyed on the newest CHANGELOG heading
 
 
 @client.event

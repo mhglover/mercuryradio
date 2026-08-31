@@ -4,6 +4,9 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-08-31
 
+- **Release notes on update.** When the bot boots on a new version, it posts that
+  release's notes (this file's newest section) to each server's card channel — silently,
+  once per release. So the room finds out what changed without anyone saying so.
 - **`/rate` now defaults to the song playing.** Leave the track blank and your rating lands
   on the current song — no card required. Naming a track still works exactly as before.
 - **`/bug` — file a bug report from inside Discord.** It lands in the database stamped with

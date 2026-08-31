@@ -15,6 +15,6 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
-COPY bot.py db.py engine.py library.py seed_plex.py ./
+COPY bot.py db.py engine.py library.py seed_plex.py CHANGELOG.md ./
 
 CMD ["python", "bot.py"]
