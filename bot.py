@@ -790,6 +790,26 @@ def _release_notes() -> tuple[str | None, str | None]:
     return m.group(1).strip(), body[:3900]  # embed description cap is 4096
 
 
+CHANGELOG_URL = "https://github.com/mhglover/mercuryradio/blob/main/CHANGELOG.md"
+
+
+def _notes_digest(notes: str) -> str:
+    """One line per bullet — the bold headline — plus a link to the full notes. The raw
+    section is written at 80 columns, and Discord renders those hard wraps as mid-sentence
+    line breaks; the whole section is also a wall (his screenshot, 9/2 4:08 PM)."""
+    heads = []
+    for block in re.split(r"\n(?=- )", notes.strip()):
+        block = " ".join(block.split())  # unwrap the hard line breaks
+        m = re.match(r"- \*\*(.+?)\*\*", block)
+        if m:
+            heads.append(m.group(1).strip())
+        elif block.startswith("- "):
+            heads.append(block[2:].split(". ")[0].strip())
+    if not heads:
+        return notes[:3900]
+    return "\n".join(f"• {h}" for h in heads) + f"\n\n[Full notes]({CHANGELOG_URL})"
+
+
 async def _announce_release() -> None:
     """On boot, if this BUILD hasn't been announced yet, post the newest CHANGELOG
     section (silently) to every configured card channel, once. Keyed on the baked-in
@@ -809,7 +829,8 @@ async def _announce_release() -> None:
         if channel is None:
             continue  # no card channel configured -> that server gets no announce
         footer = f" · build {sha[:7]}" if sha != "dev" else ""
-        embed = discord.Embed(title=f"Mercury Radio updated — {version}{footer}", description=notes)
+        embed = discord.Embed(title=f"Mercury Radio updated — {version}{footer}",
+                              description=_notes_digest(notes))
         try:
             await channel.send(embed=embed, silent=True)
         except discord.HTTPException as e:
