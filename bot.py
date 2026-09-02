@@ -455,6 +455,10 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
                 radio.current_track = "station ID"
                 radio.track_started = None
                 vc.play(psource, after=lambda err: _after(radio, vc, err, prow["path"]))
+                # Prefetch the first real track WHILE the promo plays — the two ffmpeg
+                # builds overlap instead of running serially, which is what made the
+                # wake sound like promo … pause … music (his /bug, 2026-09-02 1:15 PM).
+                _loop.create_task(_do_prefetch(radio, vc))
                 return
     if seek == 0 and radio.next_source is not None:
         row, source, picker = radio.next_row, radio.next_source, radio.next_picker

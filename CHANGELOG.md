@@ -4,6 +4,9 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-09-02
 
+- **The first song after the station ID starts sooner.** The promo and the first track
+  were each built cold, one after the other — two waits in a row on a slow host. The
+  first track now pre-buffers while the promo plays, so the wake goes promo → music.
 - **`/update` and `/bug` acknowledge instantly.** Both could miss Discord's 3-second
   response window on a busy host (an owner-lookup HTTP call, and database writes that can
   wait behind the library rescan) and show "The application did not respond." They now
