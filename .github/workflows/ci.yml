@@ -46,3 +46,12 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      # Phone ping on a successful publish — "safe to /update now". Runs only when the
+      # NTFY_URL secret is set (the full https://ntfy.sh/<topic> URL), so forks and
+      # secretless clones skip it silently. Never fails the build.
+      - name: notify phone
+        env:
+          NTFY_URL: ${{ secrets.NTFY_URL }}
+        run: |
+          [ -z "$NTFY_URL" ] && exit 0
+          curl -s -m 10 -d "mercuryradio ${{ github.ref_name }} published — /update ready" "$NTFY_URL" >/dev/null || true
