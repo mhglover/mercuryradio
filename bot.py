@@ -1086,19 +1086,22 @@ async def _is_bot_owner(user) -> bool:
 
 @tree.command(name="update", description="Restart the bot on the newest release (bot owner).")
 async def update(interaction: discord.Interaction) -> None:
+    # Defer IMMEDIATELY — Discord gives 3s to ack, and the owner check below is an HTTP
+    # call; on a busy loop it blew the window ("The application did not respond", 9/2 1:12 PM).
+    await interaction.response.defer(ephemeral=True)
     if not await _is_bot_owner(interaction.user):
-        await interaction.response.send_message("Only the bot owner can update the bot.", ephemeral=True)
+        await interaction.followup.send("Only the bot owner can update the bot.", ephemeral=True)
         return
     url, token = os.environ.get("WATCHTOWER_URL"), os.environ.get("WATCHTOWER_TOKEN")
     if not url or not token:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Self-update isn't configured — set WATCHTOWER_URL and WATCHTOWER_TOKEN in the stack "
             "(see deploy/compose.nas.yaml).", ephemeral=True)
         return
     # Reply BEFORE asking watchtower: if there IS a new image, watchtower stops this very
     # process (after the drain), so no code after the update reliably runs. The release-notes
     # announce on the new boot is the visible confirmation.
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "📦 Checking for a new release. If there is one I'll finish the current song, restart, "
         "and post the release notes when I'm back.", ephemeral=True)
 
@@ -1456,6 +1459,9 @@ async def youtube(interaction: discord.Interaction, url: str,
 @tree.command(name="bug", description="File a bug report — lands straight in the database.")
 @app_commands.describe(text="What happened. The time and the current track are recorded for you.")
 async def bug(interaction: discord.Interaction, text: str) -> None:
+    # Defer first: the writes below can wait on the library rescan's SQLite write lock,
+    # and 3s of loop time is not guaranteed on the starved host (9/2 1:15 PM timeout).
+    await interaction.response.defer(ephemeral=True)
     radio = _radio(interaction.guild_id) if interaction.guild_id else None
     row = radio.current_row if radio else None
     db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
@@ -1465,7 +1471,7 @@ async def bug(interaction: discord.Interaction, text: str) -> None:
     # Also a timestamped marker in the container log, next to the [pace] lines — a /bug
     # during a glitch is exactly the human-flagged marker the pacing work asked for.
     print(f"[bug] #{bug_id} {interaction.user.display_name}: {text}{now}")
-    await interaction.response.send_message(f"🐛 Bug #{bug_id} filed{now}. Thank you!", ephemeral=True)
+    await interaction.followup.send(f"🐛 Bug #{bug_id} filed{now}. Thank you!", ephemeral=True)
 
 
 @tree.command(name="recent", description="Show recently played tracks and rate any you missed.")

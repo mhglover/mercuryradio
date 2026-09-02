@@ -4,6 +4,11 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-09-02
 
+- **`/update` and `/bug` acknowledge instantly.** Both could miss Discord's 3-second
+  response window on a busy host (an owner-lookup HTTP call, and database writes that can
+  wait behind the library rescan) and show "The application did not respond." They now
+  defer first and reply after; database writers also wait up to 10s for a lock instead
+  of failing.
 - **Playback backs off instead of machine-gunning when the host is struggling.** Five
   consecutive tracks ending under 45 seconds (the buffered source underrunning on a
   starved host) now pause the radio for 5 minutes with one loud message, instead of

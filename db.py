@@ -114,6 +114,10 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # Writers contend with the background library rescan; without a busy timeout a locked
+    # write raises immediately, and the default stall is loop time a slash command may not
+    # have. 10s: long enough to survive a rescan burst, bounded so nothing hangs forever.
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(SCHEMA)
     _migrate(conn)
