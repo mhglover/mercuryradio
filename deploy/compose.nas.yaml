@@ -10,7 +10,7 @@ services:
     image: ghcr.io/mhglover/mercuryradio:${MERCURYRADIO_TAG:-latest}
     pull_policy: always
     container_name: mercuryradio
-    restart: unless-stopped
+    restart: always  # fleet rule 2026-09-02: unless-stopped strands a container stopped by a daemon death
     # Finish the current song before exiting on redeploy (DRAIN_TIMEOUT in bot.py);
     # docker SIGKILLs after 10s by default, so give it room.
     stop_grace_period: 330s
@@ -48,7 +48,7 @@ services:
   watchtower:
     image: containrrr/watchtower:latest
     container_name: mercuryradio-watchtower
-    restart: unless-stopped
+    restart: always  # fleet rule 2026-09-02: unless-stopped strands a container stopped by a daemon death
     command: --http-api-update --label-enable --cleanup
     environment:
       WATCHTOWER_HTTP_API_TOKEN: ${WATCHTOWER_TOKEN:?set WATCHTOWER_TOKEN to enable /update}
