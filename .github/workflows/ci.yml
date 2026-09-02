@@ -46,6 +46,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
       # Phone ping on a successful publish — "safe to /update now". Runs only when the
       # NTFY_URL secret is set (the full https://ntfy.sh/<topic> URL), so forks and
       # secretless clones skip it silently. Never fails the build.

@@ -755,24 +755,32 @@ def _release_notes() -> tuple[str | None, str | None]:
 
 
 async def _announce_release() -> None:
-    """On boot, if this build's newest CHANGELOG section hasn't been announced yet,
-    post it (silently) to every configured card channel, once."""
+    """On boot, if this BUILD hasn't been announced yet, post the newest CHANGELOG
+    section (silently) to every configured card channel, once. Keyed on the baked-in
+    commit SHA, ⛔ not the section heading — heading-keying kept same-day deploys
+    silent, which read as /update breaking its "I'll post the notes" promise (9/2).
+    A dev run (no baked SHA) falls back to heading-keying so local boots don't spam."""
     version, notes = _release_notes()
-    if not version or not notes or db.get_option(conn, "announced_release") == version:
+    if not version or not notes:
+        return
+    sha = os.environ.get("GIT_SHA", "dev")
+    key, current = ("announced_build", sha) if sha != "dev" else ("announced_release", version)
+    if db.get_option(conn, key) == current:
         return
     for row in db.list_guilds(conn):
         chan_id = row["nowplaying_channel_id"]
         channel = client.get_channel(int(chan_id)) if chan_id else None
         if channel is None:
             continue  # no card channel configured -> that server gets no announce
-        embed = discord.Embed(title=f"Mercury Radio updated — {version}", description=notes)
+        footer = f" · build {sha[:7]}" if sha != "dev" else ""
+        embed = discord.Embed(title=f"Mercury Radio updated — {version}{footer}", description=notes)
         try:
             await channel.send(embed=embed, silent=True)
         except discord.HTTPException as e:
             print(f"release-notes post failed for guild {row['guild_id']}: {e}")
     # Mark announced even if a post failed — a broken channel must not re-announce
     # to every OTHER server on each reboot; the failure is in the log above.
-    db.set_option(conn, "announced_release", version)
+    db.set_option(conn, key, current)
 
 
 async def _clear_nowplaying(radio: GuildRadio, clear_status: bool = True) -> None:

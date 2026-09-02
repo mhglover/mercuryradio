@@ -4,6 +4,10 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-09-02
 
+- **Every deployed build announces itself.** Release notes were keyed to the changelog
+  date, so a second deploy the same day restarted silently — exactly what `/update`
+  promises not to do. Announces are now keyed to the build itself (the commit baked into
+  the image), with the build id in the title.
 - **`/update` tells you how it ended.** "Nothing new" now comes back as its own reply
   instead of silence, and the opening message explains that going quiet means a real
   update is in progress. Errors reaching watchtower are reported too.

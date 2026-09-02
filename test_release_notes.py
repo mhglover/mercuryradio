@@ -32,20 +32,37 @@ class _FakeClient:
         return self._c
 
 
-def test_announce_posts_once_per_release(monkeypatch):
+def test_announce_posts_once_per_build(monkeypatch):
     bot.conn = db.connect(":memory:")
     db.upsert_guild(bot.conn, 1, 2, 3)  # guild with a card channel
     chan = _FakeChannel()
     monkeypatch.setattr(bot, "client", _FakeClient(chan))
     monkeypatch.setattr(bot, "_release_notes", lambda: ("v-test", "- notes"))
+    monkeypatch.setenv("GIT_SHA", "abc1234deadbeef")
 
     asyncio.run(bot._announce_release())
-    asyncio.run(bot._announce_release())  # same release again — reboot, not an update
+    asyncio.run(bot._announce_release())  # same build again — reboot, not an update
 
     assert len(chan.sent) == 1  # announced exactly once
     assert chan.sent[0]["silent"] is True
-    assert db.get_option(bot.conn, "announced_release") == "v-test"
+    assert db.get_option(bot.conn, "announced_build") == "abc1234deadbeef"
 
-    monkeypatch.setattr(bot, "_release_notes", lambda: ("v-next", "- more"))
+    # A NEW BUILD announces even when the CHANGELOG section heading is unchanged —
+    # the same-day-deploy silence was the 9/2 complaint.
+    monkeypatch.setenv("GIT_SHA", "fff9999deadbeef")
     asyncio.run(bot._announce_release())
-    assert len(chan.sent) == 2  # a NEW release announces again
+    assert len(chan.sent) == 2
+    assert "build fff9999" in chan.sent[1]["embed"].title
+
+
+def test_dev_run_falls_back_to_heading_key(monkeypatch):
+    bot.conn = db.connect(":memory:")
+    db.upsert_guild(bot.conn, 1, 2, 3)
+    chan = _FakeChannel()
+    monkeypatch.setattr(bot, "client", _FakeClient(chan))
+    monkeypatch.setattr(bot, "_release_notes", lambda: ("v-dev", "- notes"))
+    monkeypatch.delenv("GIT_SHA", raising=False)
+    asyncio.run(bot._announce_release())
+    asyncio.run(bot._announce_release())
+    assert len(chan.sent) == 1
+    assert db.get_option(bot.conn, "announced_release") == "v-dev"

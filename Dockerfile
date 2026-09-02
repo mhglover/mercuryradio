@@ -15,6 +15,11 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
+# The build's identity — CI passes the commit SHA; the boot announce keys on it, so
+# every deployed build announces once (same-day CHANGELOG sections used to stay silent).
+ARG GIT_SHA=dev
+ENV GIT_SHA=$GIT_SHA
+
 COPY bot.py db.py engine.py library.py seed_plex.py CHANGELOG.md ./
 
 CMD ["python", "bot.py"]
