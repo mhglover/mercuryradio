@@ -185,6 +185,12 @@ PRESENCE_WINDOW_MIN = 30
 WAKE_SEEK_SECONDS = 30
 TOPIC_EVERY = 5  # refresh the channel topic once per this many tracks
 CARD_REPOST_AFTER = 5  # chat messages since the card before a track change REPOSTS it at the bottom
+TOPIC_MIN_S = 360      # min seconds between topic edits — Discord throttles ~2/10min, and a
+                       # track-churn burst (21 tracks/4min, 2026-09-02) blew straight through the
+                       # per-track counter into a 429 whose 294s in-library retry wedged the card
+CHURN_UNDER_S = 45     # a track ending under this is a "short end" (underrun/kill, not a song)
+CHURN_BREAK_N = 5      # this many consecutive short ends trips the breaker
+CHURN_COOLDOWN_S = 300 # how long the breaker pauses picking before retrying
 
 # (label, rating value, colored square for the sidebar, button style)
 RATINGS = [
@@ -217,6 +223,8 @@ class GuildRadio:
         self.np_message = None     # the live now-playing card (ONE per guild, edited in place)
         self.card_has_cover = False  # whether the card message carries a cover attachment
         self.msgs_since_card = 0   # chat since the card last moved — counted from gateway events (no history perm)
+        self.last_topic_edit = None  # time.monotonic() of the last topic edit (time-throttled, not per-track)
+        self.short_tracks = 0      # consecutive tracks that ended under CHURN_UNDER_S — the churn breaker's count
         self.track_started = None  # time.monotonic() when the current track began (seek-adjusted), for the time bar
         self.promo_track_id = None # station-ID track for this guild (guilds.promo_track_id), loaded by _radio
         self.promo_pending = False # play the promo before the first track of this wake
@@ -366,6 +374,38 @@ async def _do_prefetch(radio: GuildRadio, vc: discord.VoiceClient) -> None:
     radio.next_row, radio.next_source, radio.next_picker = row, source, picker
 
 
+def _topic_due(radio: GuildRadio, now: float) -> bool:
+    """Topic refresh gate: enough TRACKS and enough WALL TIME. The per-track counter alone
+    assumed ~4-minute tracks; a churn burst fired 4 edits in 4 minutes and earned a 429."""
+    return radio.since_topic >= TOPIC_EVERY and (
+        radio.last_topic_edit is None or now - radio.last_topic_edit >= TOPIC_MIN_S)
+
+
+async def _set_topic(channel, topic: str) -> None:
+    try:
+        await channel.edit(topic=topic)
+    except (discord.HTTPException, AttributeError) as e:
+        print(f"could not set channel topic: {e}")
+
+
+def _note_track_end(radio: GuildRadio, now: float) -> bool:
+    """The churn breaker's count. Returns True when CHURN_BREAK_N consecutive tracks ended
+    under CHURN_UNDER_S — on a starved host the buffered source underruns to end-of-track
+    every ~30s (measured 2026-09-02: 21 tracks in 4 minutes of silence), and machine-gun
+    advancing just multiplies the damage. A normal-length track resets the count; a promo
+    or wake (track_started None) doesn't count either way."""
+    if radio.track_started is None:
+        return False
+    if now - radio.track_started < CHURN_UNDER_S:
+        radio.short_tracks += 1
+    else:
+        radio.short_tracks = 0
+    if radio.short_tracks >= CHURN_BREAK_N:
+        radio.short_tracks = 0
+        return True
+    return False
+
+
 async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) -> None:
     """Play the next track for this guild. Uses the prefetched, pre-buffered track when
     one is ready (seamless); otherwise picks + builds one now. Runs on the loop thread;
@@ -376,6 +416,22 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
         return
     if not _listeners(vc.channel):
         return  # streaming gate: at least one human must be in the VC
+    if _note_track_end(radio, time.monotonic()):
+        # Churn breaker: stop feeding a player that keeps killing tracks early (a starved
+        # host, a dead mount) — say so ONCE, loudly, and retry after the cooldown.
+        radio.track_started = None
+        print(f"[churn] {CHURN_BREAK_N} consecutive tracks ended under {CHURN_UNDER_S}s — "
+              f"pausing {CHURN_COOLDOWN_S}s")
+        try:
+            await _np_channel(radio, vc.channel).send(
+                f"⏸️ Tracks keep dying early — the host is struggling. "
+                f"Backing off for {CHURN_COOLDOWN_S // 60} minutes, then trying again.")
+        except discord.HTTPException:
+            pass
+        if _loop:
+            _loop.call_later(CHURN_COOLDOWN_S,
+                             lambda: _loop.create_task(_advance(radio, vc)))
+        return
     # A prefetch timer for the track that just ended is now moot — cancel it, but keep a
     # source that already finished prefetching so we can play it seamlessly.
     if radio.prefetch_handle is not None:
@@ -438,6 +494,7 @@ def _sync_playback(radio: GuildRadio, vc: discord.VoiceClient) -> None:
         return
     if _listeners(vc.channel) and not radio.active:
         radio.active = True
+        radio.short_tracks = 0  # a fresh wake starts the churn count clean
         radio.promo_pending = radio.promo_track_id is not None  # station ID leads this wake
         if _loop and not vc.is_playing():
             _loop.create_task(_advance(radio, vc, seek=WAKE_SEEK_SECONDS))
@@ -654,13 +711,16 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
         radio.recent_artists.append(row["artist"])
         del radio.recent_artists[:-TOPIC_EVERY]
         radio.since_topic += 1
-        if radio.since_topic >= TOPIC_EVERY:
+        now = time.monotonic()
+        if _topic_due(radio, now):
             radio.since_topic = 0
+            radio.last_topic_edit = now
             recent = list(dict.fromkeys(radio.recent_artists))
-            try:
-                await channel.edit(topic="🎵 Recent: " + ", ".join(recent))
-            except (discord.HTTPException, AttributeError) as e:
-                print(f"could not set channel topic: {e}")
+            # Fire-and-forget, ⛔ never awaited here: this runs under card_lock, and a 429's
+            # in-library retry sleep (observed 294s, 2026-09-02) held the lock and wedged
+            # every card operation behind it.
+            asyncio.get_running_loop().create_task(
+                _set_topic(channel, "🎵 Recent: " + ", ".join(recent)))
 
 
 def _release_notes() -> tuple[str | None, str | None]:

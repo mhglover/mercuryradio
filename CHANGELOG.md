@@ -2,6 +2,17 @@
 
 Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
+## 2026-09-02
+
+- **Playback backs off instead of machine-gunning when the host is struggling.** Five
+  consecutive tracks ending under 45 seconds (the buffered source underrunning on a
+  starved host) now pause the radio for 5 minutes with one loud message, instead of
+  burning through the library in silence at 30 s/track.
+- **Channel-topic updates are time-throttled and can no longer jam the card.** The
+  churn above fired topic edits fast enough to hit Discord's rate limit, and the
+  retry wait was holding the card's lock — the card froze and the bot's status went
+  stale. Topic edits now happen at most every 6 minutes, off to the side.
+
 ## 2026-08-31
 
 - **`/update` — tell the bot to restart on the newest release** (bot owner only). It
