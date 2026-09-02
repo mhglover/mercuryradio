@@ -7,6 +7,9 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 - **Loving a song harder gets noticed.** Press Love on a track you already Love and the
   card briefly wears a reaction — once per person per song, and it grows (💙 → 💖 → 🎆)
   as more of the room doubles down together.
+- **Short songs don't trip the struggle detector.** A run of interludes or skits — real
+  tracks that are just short — no longer looks like the host failing; only a track that
+  dies early *for its length* counts toward the back-off.
 - **Release notes post as a digest.** The boot announce now shows one headline per
   change with a link to the full notes, instead of the whole hard-wrapped section.
 - **`/this` — talk about the song playing now.** Posts *🎶 Artist – Title — your comment*

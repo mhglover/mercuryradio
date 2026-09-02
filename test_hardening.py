@@ -37,6 +37,20 @@ def test_churn_breaker_trips_on_consecutive_short_ends():
     assert r.short_tracks == 0  # and the count resets with the trip
 
 
+def test_a_legitimately_short_track_is_not_churn():
+    r = _radio()
+    import time as _t
+    now = _t.monotonic()
+    for _ in range(bot.CHURN_BREAK_N + 2):  # a run of interludes must never trip the breaker
+        r.track_started = now - 30
+        r.current_row = {"id": 1, "duration": 28.0}  # ended on time for its length
+        assert not bot._note_track_end(r, now)
+    r.current_row = {"id": 2, "duration": 240.0}  # a real song dying at 30s IS churn
+    r.track_started = now - 30
+    bot._note_track_end(r, now)
+    assert r.short_tracks == 1
+
+
 def test_normal_track_resets_and_promo_does_not_count():
     r = _radio()
     now = time.monotonic()

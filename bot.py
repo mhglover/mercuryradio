@@ -408,6 +408,9 @@ def _note_track_end(radio: GuildRadio, now: float) -> bool:
     or wake (track_started None) doesn't count either way."""
     if radio.track_started is None:
         return False
+    dur = (radio.current_row or {}).get("duration")
+    if dur and dur < CHURN_UNDER_S:
+        return False  # a legitimately short track (interlude, skit) ending on time is not churn
     if now - radio.track_started < CHURN_UNDER_S:
         radio.short_tracks += 1
     else:
