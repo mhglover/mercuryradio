@@ -4,6 +4,9 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-09-02
 
+- **`/update` tells you how it ended.** "Nothing new" now comes back as its own reply
+  instead of silence, and the opening message explains that going quiet means a real
+  update is in progress. Errors reaching watchtower are reported too.
 - **Skips are instant now, not just track endings.** The next song pre-buffers ten
   seconds after the current one starts (it used to build only near the end), so an early
   `/skip` lands on a ready source. Requests still jump the queue: a `/request` made after

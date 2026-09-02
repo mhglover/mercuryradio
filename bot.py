@@ -1117,18 +1117,30 @@ async def update(interaction: discord.Interaction) -> None:
     # process (after the drain), so no code after the update reliably runs. The release-notes
     # announce on the new boot is the visible confirmation.
     await interaction.followup.send(
-        "📦 Checking for a new release. If there is one I'll finish the current song, restart, "
-        "and post the release notes when I'm back.", ephemeral=True)
+        "📦 Checking for a new release — a moment. If there IS one: I finish the current song, "
+        "restart, and post the release notes when I'm back (a few minutes, and this thread goes "
+        "quiet — that silence means it's working). If not, I'll say so right here.", ephemeral=True)
 
     async def _kick() -> None:
+        # Any HTTP answer from watchtower means NO update happened — a real update kills
+        # this very process before the request returns. So an answer is reportable, and
+        # the silence of a real update is covered by the message above.
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers={"Authorization": f"Bearer {token}"},
                                         timeout=aiohttp.ClientTimeout(total=900)) as r:
-                    print(f"[update] watchtower answered {r.status}: {(await r.text())[:200]!r} "
+                    print(f"[update] watchtower answered {r.status} "
                           "(an answer means NO new image — a real update kills this process first)")
+                    msg = ("✅ Already on the newest release — nothing to do."
+                           if r.status < 400 else
+                           f"⚠️ Watchtower answered {r.status} — check its container log.")
         except Exception as e:
             print(f"[update] watchtower call failed: {e}")
+            msg = f"⚠️ Couldn't reach watchtower: {e}"
+        try:
+            await interaction.followup.send(msg, ephemeral=True)
+        except discord.HTTPException:
+            pass  # followup token expired (very slow answer) — the log line above stands
 
     asyncio.get_running_loop().create_task(_kick())
 
