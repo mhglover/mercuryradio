@@ -193,6 +193,8 @@ TOPIC_MIN_S = 360      # min seconds between topic edits — Discord throttles ~
 CHURN_UNDER_S = 45     # a track ending under this is a "short end" (underrun/kill, not a song)
 CHURN_BREAK_N = 5      # this many consecutive short ends trips the breaker
 CHURN_COOLDOWN_S = 300 # how long the breaker pauses picking before retrying
+LOVE_TIERS = ["💙", "💖", "🎆"]  # double-Love flourish, escalating with distinct lovers this track
+FLOURISH_S = 12                # how long a flourish reaction stays on the card
 
 # (label, rating value, colored square for the sidebar, button style)
 RATINGS = [
@@ -227,6 +229,7 @@ class GuildRadio:
         self.msgs_since_card = 0   # chat since the card last moved — counted from gateway events (no history perm)
         self.last_topic_edit = None  # time.monotonic() of the last topic edit (time-throttled, not per-track)
         self.short_tracks = 0      # consecutive tracks that ended under CHURN_UNDER_S — the churn breaker's count
+        self.love_flourished = set()  # user ids who double-Loved THIS track (one flourish each; cleared per track)
         self.track_started = None  # time.monotonic() when the current track began (seek-adjusted), for the time bar
         self.promo_track_id = None # station-ID track for this guild (guilds.promo_track_id), loaded by _radio
         self.promo_pending = False # play the promo before the first track of this wake
@@ -570,6 +573,33 @@ class RatingView(discord.ui.View):
             self.add_item(_RatingButton(label, value, square, style))
 
 
+def _love_flourish_emoji(radio: GuildRadio, uid: str, old_rating, new_rating) -> str | None:
+    """Pressing Love on a track you ALREADY Love — "expressing that love harder" (his ask,
+    9/2) — earns a subtle reaction on the card. Once per person per track; more distinct
+    double-lovers escalate the tier. Ordinary ratings (including the first Love) get nothing."""
+    if new_rating != db.LOVE or old_rating != db.LOVE:
+        return None
+    if uid in radio.love_flourished:
+        return None
+    radio.love_flourished.add(uid)
+    return LOVE_TIERS[min(len(radio.love_flourished), len(LOVE_TIERS)) - 1]
+
+
+async def _flourish(radio: GuildRadio, emoji: str) -> None:
+    """React on the card, linger, tidy up. The card is ONE edited message, so the reaction
+    must be removed or it would ride onto the next song. Best-effort throughout — a missing
+    Add Reactions permission or a deleted card must never break rating."""
+    msg = radio.np_message
+    if msg is None:
+        return
+    try:
+        await msg.add_reaction(emoji)
+        await asyncio.sleep(FLOURISH_S)
+        await msg.remove_reaction(emoji, client.user)
+    except discord.HTTPException:
+        pass
+
+
 class _RatingButton(discord.ui.Button):
     def __init__(self, label, value, square, style):
         super().__init__(label=label, emoji=square, style=style)
@@ -581,9 +611,14 @@ class _RatingButton(discord.ui.Button):
             await interaction.response.send_message("Nothing playing.", ephemeral=True)
             return
         await interaction.response.defer()  # ack first — Discord gives 3s; do the DB work after
+        uid = str(interaction.user.id)
+        old_rating = db.get_rating(conn, uid, radio.current_row["id"])
         db.upsert_user(conn, interaction.user.id, interaction.user.display_name)
-        db.set_rating(conn, str(interaction.user.id), radio.current_row["id"], self.value)
+        db.set_rating(conn, uid, radio.current_row["id"], self.value)
         db.touch_presence(conn, interaction.user.id, interaction.guild_id)  # rating == present here
+        emoji = _love_flourish_emoji(radio, uid, old_rating, self.value)
+        if emoji:
+            asyncio.get_running_loop().create_task(_flourish(radio, emoji))
         await _refresh_sidebar(radio)
 
 
@@ -715,6 +750,7 @@ async def _post_nowplaying(radio: GuildRadio, voice_channel, row: dict) -> None:
             except discord.HTTPException as e:
                 print(f"could not post now-playing card: {e}")
         radio.msgs_since_card = 0  # the card just moved (edited or reposted) — restart the burial count
+        radio.love_flourished.clear()  # new song, fresh flourishes
         try:  # bot status is global (one per bot); with N guilds it shows the latest track
             await client.change_presence(
                 activity=discord.Activity(type=discord.ActivityType.listening, name=f"{row['artist']} – {row['title']}")
@@ -1507,6 +1543,21 @@ async def bug(interaction: discord.Interaction, text: str) -> None:
     # during a glitch is exactly the human-flagged marker the pacing work asked for.
     print(f"[bug] #{bug_id} {interaction.user.display_name}: {text}{now}")
     await interaction.followup.send(f"🐛 Bug #{bug_id} filed{now}. Thank you!", ephemeral=True)
+
+
+@tree.command(name="this", description="Talk about the song playing now — your comment anchors to it in chat.")
+@app_commands.describe(comment="What you want to say about it (optional)")
+async def this(interaction: discord.Interaction, comment: str | None = None) -> None:
+    # No defer: nothing below does I/O, and the whole point is a PUBLIC message —
+    # a public "thinking…" placeholder would be noisier than the reply.
+    radio = _radio(interaction.guild_id) if interaction.guild_id else None
+    row = radio.current_row if radio else None
+    if row is None:
+        await interaction.response.send_message("Nothing is playing right now.", ephemeral=True)
+        return
+    label = f"**{row['artist']} – {row['title']}**"
+    msg = f"🎶 {label} — {comment}" if comment else f"🎶 {label}"
+    await interaction.response.send_message(msg)
 
 
 @tree.command(name="recent", description="Show recently played tracks and rate any you missed.")

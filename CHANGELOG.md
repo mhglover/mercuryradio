@@ -2,6 +2,14 @@
 
 Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
+## Unreleased
+
+- **Loving a song harder gets noticed.** Press Love on a track you already Love and the
+  card briefly wears a reaction — once per person per song, and it grows (💙 → 💖 → 🎆)
+  as more of the room doubles down together.
+- **`/this` — talk about the song playing now.** Posts *🎶 Artist – Title — your comment*
+  to the channel, so chat about a song stays anchored to it in the log.
+
 ## 2026-09-02
 
 - **Every deployed build announces itself.** Release notes were keyed to the changelog

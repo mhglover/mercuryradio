@@ -70,6 +70,7 @@ listeners away and the score doesn't exist.**
   and the optional `artist:`/`title:` params override either. Downloaded off the audio loop, capped
   at `MAX_ADD_MINUTES` (default 20), lands in `ADDED_DIR` like `/add`. The "Added" lands publicly in
   the channel; the interim and any errors are shown only to you.
+- `/this [comment]` — say something about the song playing now; it posts anchored to the track.
 - `/recent` — show the last few played tracks and rate one you didn't click while it played.
 - `/bug <text>` — file a bug report straight into the database, stamped with the time, you, and
   the track playing right now.
@@ -106,7 +107,7 @@ Copy `.env.sample` to `.env` and set:
 - `GUILD_ID` / `VOICE_CHANNEL_ID` / `NOWPLAYING_CHANNEL_ID` — **optional**, seed-only (see below).
 
 Invite the bot with the `bot` + `applications.commands` scopes and the **View Channels, Send
-Messages, Embed Links, Connect, Speak, Manage Channels** permissions.
+Messages, Embed Links, Add Reactions, Connect, Speak, Manage Channels** permissions.
 
 ## Multiple servers (multi-tenant)
 
