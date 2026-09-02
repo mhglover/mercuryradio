@@ -2,7 +2,7 @@
 
 Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
-## Unreleased
+## 2026-09-02 — evening
 
 - **Loving a song harder gets noticed.** Press Love on a track you already Love and the
   card briefly wears a reaction — once per person per song, and it grows (💙 → 💖 → 🎆)
