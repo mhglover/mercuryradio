@@ -75,3 +75,12 @@ if __name__ == "__main__":
         fn()
         print(f"ok {fn.__name__}")
     print("all shas_import checks passed")
+
+
+def test_appledouble_rows_are_purged_and_skipped():
+    import db as _db
+    c = _db.connect(":memory:")
+    _db.upsert_track(c, "Unknown Artist", "._junk", "", "/music/A/._junk.mp3")
+    from db import _migrate
+    _migrate(c)  # the purge runs at every connect
+    assert c.execute("SELECT COUNT(*) FROM tracks WHERE path LIKE '%/._%'").fetchone()[0] == 0

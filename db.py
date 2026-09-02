@@ -136,6 +136,10 @@ def _migrate(conn) -> None:
     if "add_role_id" not in gcols:
         conn.execute("ALTER TABLE guilds ADD COLUMN add_role_id TEXT")
         conn.commit()
+    # AppleDouble sidecars ("._foo.mp3") were scanned in as unplayable tracks before the
+    # library walk learned to skip them (2026-09-02). Purge survivors; they carry no ratings.
+    conn.execute("DELETE FROM tracks WHERE path LIKE '%/._%'")
+    conn.commit()
     # add_enabled controls whether /add + /youtube are registered (visible) per guild.
     # New servers default off (hidden); grandfather every server that predates this column
     # to on, so existing rooms keep the adding they already had.

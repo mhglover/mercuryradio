@@ -133,6 +133,9 @@ def scan(music_dir: str, db_path: str | None = None) -> int:
     conn = db.connect(db_path)
     try:
         for p in Path(music_dir).rglob("*"):
+            if p.name.startswith("._"):
+                continue  # AppleDouble sidecars — resource forks, not audio; 16 were
+                          # indexed as unplayable "Unknown Artist" tracks (found 9/2)
             if p.suffix.lower() in AUDIO_EXTS and p.is_file():
                 artist, title, album, duration = _read_tags(str(p))
                 db.upsert_track(conn, artist, title, album, str(p), duration)
