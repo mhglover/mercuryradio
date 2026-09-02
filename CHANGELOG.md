@@ -4,6 +4,10 @@ Notable changes to Mercury Radio, newest first. Each deployment gets an entry.
 
 ## 2026-09-02
 
+- **Skips are instant now, not just track endings.** The next song pre-buffers ten
+  seconds after the current one starts (it used to build only near the end), so an early
+  `/skip` lands on a ready source. Requests still jump the queue: a `/request` made after
+  the pre-pick throws the stale prefetch away at the boundary.
 - **The first song after the station ID starts sooner.** The promo and the first track
   were each built cold, one after the other — two waits in a row on a slow host. The
   first track now pre-buffers while the promo plays, so the wake goes promo → music.

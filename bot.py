@@ -59,7 +59,9 @@ STREAM_BITRATE = 128  # kbps Opus; avoids FFmpegOpusAudio's blocking probe
 # is seamless.
 BUFFER_AHEAD_FRAMES = 500     # max buffered (20ms each) -> ~10s cushion for mid-track blips
 PREROLL_FRAMES = 100         # buffer this much (~2s) before handing to the player
-PREFETCH_LEAD_S = 12         # start building the next track this many seconds before the end
+PREFETCH_EARLY_S = 10        # build the next track this long after the CURRENT one starts, so an
+                             # early /skip lands on a warm source (his ask 9/2). The old end-timed
+                             # pick-late (12s before the end) left every early skip a cold build.
 MAX_SILENCE_FRAMES = 750     # give up (end the track) after ~15s of continuous underrun
 OPUS_SILENCE = b"\xf8\xff\xfe"  # a 20ms Opus silence frame (what discord.py itself sends)
 # Diagnostic (set PACE_DEBUG=1): log when playback pacing slips, and split a slow
@@ -229,7 +231,7 @@ class GuildRadio:
         self.promo_track_id = None # station-ID track for this guild (guilds.promo_track_id), loaded by _radio
         self.promo_pending = False # play the promo before the first track of this wake
         self.card_lock = asyncio.Lock()  # serialize card ops so a track change can't leak a card
-        self.next_row = None       # prefetched next track (picked ~PREFETCH_LEAD_S before the end)
+        self.next_row = None       # prefetched next track (picked ~PREFETCH_EARLY_S after this one starts)
         self.next_source = None    # its pre-rolled _BufferedOpus, ready to play seamlessly
         self.next_picker = None    # the picker reason for the prefetched track
         self.prefetch_handle = None  # the loop.call_later timer that runs the prefetch
@@ -343,17 +345,15 @@ def _cancel_prefetch(radio: GuildRadio) -> None:
 
 
 def _schedule_prefetch(radio: GuildRadio, vc: discord.VoiceClient, row: dict, seek: int) -> None:
-    """Arrange for the next track to be picked + pre-buffered ~PREFETCH_LEAD_S before
-    this one ends, so the boundary is seamless. Skipped when the duration is unknown."""
+    """Pick + pre-buffer the next track shortly after THIS one starts, so both an early
+    /skip and the natural boundary land on a warm source. The pick is therefore early —
+    a /request arriving later is honored by the staleness guard in _advance, which
+    discards a non-request prefetch when requests are pending. No duration needed."""
     if radio.prefetch_handle is not None:
         radio.prefetch_handle.cancel()
         radio.prefetch_handle = None
-    dur = row.get("duration")
-    if not dur:  # unknown length -> can't time it; next track just pays startup latency
-        return
-    delay = max(1.0, float(dur) - seek - PREFETCH_LEAD_S)
     radio.prefetch_handle = _loop.call_later(
-        delay, lambda: _loop.create_task(_do_prefetch(radio, vc)))
+        PREFETCH_EARLY_S, lambda: _loop.create_task(_do_prefetch(radio, vc)))
 
 
 async def _do_prefetch(radio: GuildRadio, vc: discord.VoiceClient) -> None:
@@ -372,6 +372,15 @@ async def _do_prefetch(radio: GuildRadio, vc: discord.VoiceClient) -> None:
         print(f"prefetch build failed: {e}")
         return
     radio.next_row, radio.next_source, radio.next_picker = row, source, picker
+
+
+def _prefetch_stale_for_requests(radio: GuildRadio) -> bool:
+    """True when the early prefetch should be thrown away: it isn't a request, and a
+    request is now waiting. Early prefetching (skip warmth) must not cost the room its
+    requests-jump-the-queue behavior — the cost is one cold build, same as before."""
+    if radio.next_source is None or radio.next_picker == "request":
+        return False
+    return db.pending_request_count(conn, str(radio.guild_id)) > 0
 
 
 def _topic_due(radio: GuildRadio, now: float) -> bool:
@@ -460,6 +469,8 @@ async def _advance(radio: GuildRadio, vc: discord.VoiceClient, seek: int = 0) ->
                 # wake sound like promo … pause … music (his /bug, 2026-09-02 1:15 PM).
                 _loop.create_task(_do_prefetch(radio, vc))
                 return
+    if seek == 0 and _prefetch_stale_for_requests(radio):
+        _discard_prefetch(radio)  # a /request arrived after the early pick — it goes first
     if seek == 0 and radio.next_source is not None:
         row, source, picker = radio.next_row, radio.next_source, radio.next_picker
         radio.next_row = radio.next_source = radio.next_picker = None
